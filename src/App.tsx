@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { NAV } from './lib/nav';
-import { loadState, saveState, uid, now } from './lib/store';
+import { loadState, saveState, uid, now, reviewCard } from './lib/store';
 import type { AppState, DestinationId, MindNode, Subject, Chapter, Note, TTEvent } from './types';
 
 const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -17,6 +17,7 @@ export default function App() {
 
   useEffect(() => saveState(state), [state]);
   useEffect(() => { const onK = (e: KeyboardEvent) => { if ((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k') { e.preventDefault(); setCmdk(v=>!v);} }; window.addEventListener('keydown', onK); return ()=>window.removeEventListener('keydown', onK); }, []);
+  useEffect(() => { document.documentElement.dataset.theme = state.settings.theme; document.body.style.background = state.settings.theme==='light' ? '#f1f5f9' : ''; document.body.style.color = state.settings.theme==='light' ? '#0f172a' : ''; }, [state.settings.theme]);
 
   const upd = (fn: (s: AppState) => AppState) => setState(s => fn(structuredClone(s)));
 
@@ -74,15 +75,15 @@ export default function App() {
           {tab==='my-learning' && <MyLearning state={state} upd={upd} />}
           {tab==='notes' && <NotesPage state={state} upd={upd} />}
           {tab==='documents' && <SimpleModule title="Documents" icon="📄" desc="Document library & research workspace (Phase 6: import, viewer, annotations, AI analysis/RAG with citations). Current foundation: organize subjects/topics and attach notes/resources." actions={[['Upload document (coming)','Store PDFs/TXT/MD and view'],['AI analysis (coming)','Summaries, concepts, Q&A with sources']]} />}
-          {tab==='ai-tutor' && <AiTutor state={state} />}
+          {tab==='ai-tutor' && <AiTutor state={state} upd={upd} />}
           {tab==='flashcards' && <Flashcards state={state} upd={upd} />}
           {tab==='mind-maps' && <MindMaps state={state} upd={upd} />}
-          {tab==='quiz-centre' && <QuizCentre />}
+          {tab==='quiz-centre' && <QuizCentre state={state} upd={upd} />}
           {tab==='focus' && <FocusPage state={state} upd={upd} />}
           {tab==='exams' && <Exams state={state} upd={upd} />}
           {tab==='analytics' && <Analytics state={state} />}
           {tab==='study-groups' && <SimpleModule title="Study Groups" icon="👥" desc="Collaboration hub (Phase 8: groups, shared resources, live co-editing, group goals/challenges). Foundation: plan and share via exports/notes now; collaboration requires backend/sync." actions={[['Create group (coming)','Shared workspace & members'],['Share resources (coming)','Notes, decks, maps, plans']]} />}
-          {tab==='resource-library' && <ResourceLibrary state={state} />}
+          {tab==='resource-library' && <ResourceLibrary state={state} upd={upd} />}
           {tab==='settings' && <SettingsPage state={state} upd={upd} />}
         </main>
       </div>
@@ -231,25 +232,39 @@ function FocusPage({state, upd}:{state:AppState; upd:any}) {
 
 function Flashcards({state, upd}:{state:AppState; upd:any}) {
   const [front,setFront]=useState(''); const [back,setBack]=useState(''); const [deck,setDeck]=useState(state.decks[0]?.id||'');
-  const add = ()=>{ if(!front||!back) return; upd((s:AppState)=>{s.flashcards.push({id:uid(),front,back,deckId:deck}); return s;}); setFront(''); setBack(''); };
+  const [review,setReview]=useState(false); const [show,setShow]=useState(false);
+  const todayStr = new Date().toISOString().slice(0,10);
+  const due = state.flashcards.filter(c=>c.due<=todayStr);
+  const current = review ? due[0] : null;
+  const add = ()=>{ if(!front||!back) return; upd((s:AppState)=>{s.flashcards.push({id:uid(),front,back,deckId:deck,due:new Date().toISOString().slice(0,10),interval:0,ease:2.5,reps:0}); return s;}); setFront(''); setBack(''); };
+  const grade = (g:number)=>{ if(!current) return; upd((s:AppState)=>{const i=s.flashcards.findIndex(x=>x.id===current.id); if(i>=0) s.flashcards[i]=reviewCard(s.flashcards[i],g); return s;}); setShow(false); };
+  if(review && current){ return <div><PageHeader title="Review session" subtitle={`${due.length} due`} right={<button className="btn" onClick={()=>setReview(false)}>Exit</button>} />
+    <div className="card"><h3>{current.front}</h3>{!show ? <button className="btn primary" onClick={()=>setShow(true)}>Show answer</button> : <><div className="node" style={{marginTop:8}}>{current.back}</div><div className="row" style={{marginTop:10}}><button className="btn danger" onClick={()=>grade(1)}>Again</button><button className="btn" onClick={()=>grade(3)}>Hard</button><button className="btn" onClick={()=>grade(4)}>Good</button><button className="btn primary" onClick={()=>grade(5)}>Easy</button></div></>}</div></div>; }
   return <div>
-    <PageHeader title="Flashcards" subtitle="Active recall foundation — unlimited cards/decks (FSRS scheduling & advanced card types planned in Phase 4)" />
+    <PageHeader title="Flashcards" subtitle="Active recall with basic spaced repetition (SM-2 style) — unlimited, free" right={<button className="btn primary" onClick={()=>setReview(true)} disabled={due.length===0}>Review due ({due.length})</button>} />
     <div className="grid g2 section">
       <div className="card"><h3>Create card</h3><div className="row"><select value={deck} onChange={e=>setDeck(e.target.value)}>{state.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select><input placeholder="Deck name to add" id="nd" /><button className="btn" onClick={()=>{const el=document.getElementById('nd') as HTMLInputElement; if(el?.value){const d={id:uid(),name:el.value}; upd((s:AppState)=>{s.decks.push(d); return s;}); setDeck(d.id); el.value='';}}}>+ deck</button></div>
         <input style={{width:'100%',marginTop:8}} placeholder="Front (question)" value={front} onChange={e=>setFront(e.target.value)} />
         <textarea placeholder="Back (answer)" value={back} onChange={e=>setBack(e.target.value)} />
         <button className="btn primary" onClick={add}>Add card</button>
       </div>
-      <div className="card"><h3>Cards ({state.flashcards.length})</h3><ul className="list">{state.flashcards.map(c=> <li key={c.id} className="node"><b>{c.front}</b><div className="muted">{c.back}</div><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.flashcards=s.flashcards.filter(x=>x.id!==c.id); return s;})}>remove</button></li>)}{state.flashcards.length===0 && <div className="empty">No cards yet. Create from notes/topics in later phases.</div>}</ul></div>
+      <div className="card"><h3>Cards ({state.flashcards.length})</h3><ul className="list">{state.flashcards.map(c=> <li key={c.id} className="node"><div className="row spread"><b>{c.front}</b><span className="tag">due {c.due}</span></div><div className="muted">{c.back}</div><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.flashcards=s.flashcards.filter(x=>x.id!==c.id); return s;})}>remove</button></li>)}{state.flashcards.length===0 && <div className="empty">No cards yet.</div>}</ul></div>
     </div>
   </div>;
 }
 
 function Exams({state, upd}:{state:AppState; upd:any}) {
-  const [name,setName]=useState(''); const [date,setDate]=useState('');
+  const [name,setName]=useState(''); const [date,setDate]=useState(''); const [item,setItem]=useState('');
   return <div>
-    <PageHeader title="Exams" subtitle="Examination & syllabus tracking foundation (countdowns, simulations, revision strategy in Phases 3/5)" right={<div className="row"><input placeholder="Exam name" value={name} onChange={e=>setName(e.target.value)} /><input type="date" value={date} onChange={e=>setDate(e.target.value)} /><button className="btn primary" onClick={()=>{if(!name) return; upd((s:AppState)=>{s.exams.push({id:uid(),name,date,syllabus:'',status:'planned'}); return s;}); setName('');}}>Add</button></div>} />
-    <div className="card">{state.exams.length===0 ? <div className="empty">No exams yet. Add one to track preparation.</div> : <table><thead><tr><th>Exam</th><th>Date</th><th>Status</th><th></th></tr></thead><tbody>{state.exams.map(e=> <tr key={e.id}><td>{e.name}</td><td>{e.date||'—'}</td><td><span className="tag">{e.status}</span></td><td><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.exams=s.exams.filter(x=>x.id!==e.id); return s;})}>remove</button></td></tr>)}</tbody></table>}</div>
+    <PageHeader title="Exams" subtitle="Examinations & syllabus tracker foundation (countdown, simulation in later phases)" right={<div className="row"><input placeholder="Exam name" value={name} onChange={e=>setName(e.target.value)} /><input type="date" value={date} onChange={e=>setDate(e.target.value)} /><button className="btn primary" onClick={()=>{if(!name) return; upd((s:AppState)=>{s.exams.push({id:uid(),name,date,syllabus:[],status:'planned'}); return s;}); setName('');}}>Add</button></div>} />
+    {state.exams.length===0 ? <div className="card"><div className="empty">No exams yet. Add one to track preparation.</div></div> : state.exams.map(e=> {
+      const done = e.syllabus.filter(s=>s.status==='completed'||s.status==='mastered').length; const pct = e.syllabus.length?Math.round(done/e.syllabus.length*100):0;
+      const days = e.date ? Math.ceil((new Date(e.date).getTime()-Date.now())/86400000) : null;
+      return <div key={e.id} className="card section"><div className="row spread"><h3>{e.name}</h3><span className="row"><span className="tag">{e.date||'no date'}</span>{days!=null && <span className="tag">{days>=0?`${days} days left`:'past'}</span>}<button className="btn danger" onClick={()=>upd((s:AppState)=>{s.exams=s.exams.filter(x=>x.id!==e.id); return s;})}>remove</button></span></div>
+        <div className="muted">Syllabus progress {pct}%</div><div className="progress"><span style={{width:`${pct}%`}}/></div>
+        <div className="row" style={{marginTop:8}}><input placeholder="Add syllabus item/topic" value={item} onChange={ev=>setItem(ev.target.value)} /><button className="btn" onClick={()=>{if(!item) return; upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.syllabus.push({id:uid(),text:item,status:'not-started'}); return s;}); setItem('');}}>Add item</button></div>
+        <ul className="list">{e.syllabus.map(it=> <li key={it.id} className="row spread"><span>{it.text} <span className="tag">{it.status}</span></span><span className="row"><select value={it.status} onChange={ev=>upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.syllabus.find(y=>y.id===it.id)!.status=ev.target.value as any; return s;})}><option value="not-started">not started</option><option value="learning">learning</option><option value="completed">completed</option><option value="needs-revision">needs revision</option><option value="mastered">mastered</option></select><button className="btn danger" onClick={()=>upd((s:AppState)=>{const ex=s.exams.find(x=>x.id===e.id)!; ex.syllabus=ex.syllabus.filter(y=>y.id!==it.id); return s;})}>x</button></span></li>)}</ul>
+      </div>; })}
   </div>;
 }
 
@@ -271,49 +286,180 @@ function Analytics({state}:{state:AppState}) {
   </div>;
 }
 
-function AiTutor({state}:{state:AppState}) {
-  const [input,setInput]=useState(''); const [msgs,setMsgs]=useState<{role:'user'|'ai',text:string}[]>([{role:'ai',text:'Hi! I\'m the Focus Deck AI Tutor (foundation). I can help you plan study steps using your local subjects/notes. Full AI provider integration, RAG over your documents/notes with citations, and advanced modes are planned (Phase 6).'}]);
-  const send = ()=>{
-    if(!input.trim()) return; const q=input.trim(); setInput('');
-    const ctx = state.subjects.map(s=>s.name).join(', ') || 'no subjects yet';
-    const reply = `Local guidance (no external model): I see your subjects: ${ctx}. For "${q}", try: 1) identify key concepts, 2) make a short note in Notes, 3) create 3 flashcards, 4) add a 25-min Focus session. This is a transparent placeholder until AI providers & retrieval are configured.`;
-    setMsgs(m=>[...m,{role:'user',text:q},{role:'ai',text:reply}]);
-  };
+function DocumentsPage({state, upd}:{state:AppState; upd:any}) {
+  const [title,setTitle]=useState(''); const [type,setType]=useState('PDF');
   return <div>
-    <PageHeader title="AI Tutor" subtitle="Conversational learning assistant — foundation (provider/RAG/citations/modes in Phase 6)" />
-    <div className="card"><div style={{maxHeight:360, overflow:'auto', display:'flex', flexDirection:'column', gap:8}}>
-      {msgs.map((m,i)=> <div key={i} className="node" style={{alignSelf: m.role==='user'?'flex-end':'flex-start', maxWidth:'85%'}}><b>{m.role==='user'?'You':'Tutor'}</b><div>{m.text}</div></div>)}
+    <PageHeader title="Documents" subtitle="Document library foundation (upload/viewer/annotations/RAG in later phases). Track and link documents to subjects now." right={<span className="pill">{state.resources.filter(r=>['PDF','Document','TXT','Markdown'].includes(r.type)).length} docs</span>} />
+    <div className="grid g2">
+      <div className="card"><h3>Add document entry</h3><p className="muted">Full file import/viewer pipeline requires storage backend; add metadata/links now.</p>
+        <div className="row"><input placeholder="Document title" value={title} onChange={e=>setTitle(e.target.value)} /><select value={type} onChange={e=>setType(e.target.value)}><option>PDF</option><option>Document</option><option>TXT</option><option>Markdown</option></select><button className="btn primary" onClick={()=>{if(!title) return; upd((s:AppState)=>{s.resources.unshift({id:uid(),title,type,addedAt:new Date().toLocaleString(),note:''}); return s;}); setTitle('');}}>Add</button></div>
+      </div>
+      <div className="card"><h3>AI & research (planned)</h3><ul className="list"><li>Import & text extraction (Phase 6)</li><li>Q&A with source citations / RAG (Phase 6)</li><li>Generate notes, cards, mind maps, quizzes from docs (Phase 6)</li></ul></div>
     </div>
-    <div className="row" style={{marginTop:10}}><input style={{flex:1}} value={input} onChange={e=>setInput(e.target.value)} placeholder="Ask a question..." onKeyDown={e=>e.key==='Enter'&&send()} /><button className="btn primary" onClick={send}>Send</button></div></div>
+    <div className="card"><h3>Document entries</h3>{state.resources.filter(r=>['PDF','Document','TXT','Markdown','Link'].includes(r.type)).length===0 ? <div className="empty">No documents yet.</div> : <ul className="list">{state.resources.filter(r=>['PDF','Document','TXT','Markdown','Link'].includes(r.type)).map(r=> <li key={r.id} className="row spread"><span><b>{r.title}</b> <span className="tag">{r.type}</span></span><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.resources=s.resources.filter(x=>x.id!==r.id); return s;})}>x</button></li>)}</ul>}</div>
   </div>;
 }
 
-function ResourceLibrary({state}:{state:AppState}) {
+function StudyGroups({state, upd}:{state:AppState; upd:any}) {
+  const [name,setName]=useState(''); const [desc,setDesc]=useState('');
   return <div>
-    <PageHeader title="Resource Library" subtitle="Central library for learning materials (file storage, previews, metadata in later phases)" />
+    <PageHeader title="Study Groups" subtitle="Collaboration foundation (real-time sharing/editing needs backend/sync, Phase 8)" right={<span className="pill">{state.groups.length} groups</span>} />
     <div className="grid g2">
-      <div className="card"><h3>Linked resources (from your data)</h3><ul className="list"><li>Notes: {state.notes.length}</li><li>Mind maps: {state.mindMaps.length}</li><li>Flashcard decks: {state.decks.length}</li><li>Subjects: {state.subjects.length}</li></ul></div>
-      <div className="card"><h3>Library</h3><div className="empty">No external files uploaded yet. Document import & file storage planned in Phase 2/6. Use Notes and Mind Maps now — all unlocked.</div></div>
+      <div className="card"><h3>Create group (local)</h3><input placeholder="Group name" value={name} onChange={e=>setName(e.target.value)} /><textarea placeholder="Description / subject" value={desc} onChange={e=>setDesc(e.target.value)} /><button className="btn primary" onClick={()=>{if(!name) return; upd((s:AppState)=>{s.groups.unshift({id:uid(),name,description:desc,members:1}); return s;}); setName(''); setDesc('');}}>Create</button></div>
+      <div className="card"><h3>Groups</h3>{state.groups.length===0 ? <div className="empty">No groups yet. Create a group to organize shared goals (sync/collab in later phases).</div> : <ul className="list">{state.groups.map(g=> <li key={g.id} className="node"><b>{g.name}</b><div className="muted">{g.description}</div><div className="row spread"><span className="tag">{g.members} member(s)</span><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.groups=s.groups.filter(x=>x.id!==g.id); return s;})}>remove</button></div></li>)}</ul>}</div>
+    </div>
+  </div>;
+}
+
+function AiTutor({state, upd}:{state:AppState; upd:any}) {
+  const [input,setInput]=useState('');
+  const [busy,setBusy]=useState(false);
+  const [msgs,setMsgs]=useState<{role:'user'|'ai',text:string}[]>([{role:'ai',text:'AI Tutor ready. Configure a provider (OpenAI-compatible, local Ollama, Anthropic, Gemini/custom endpoint) in Settings → AI & MCP, or use local guidance mode. Conversations are stored locally in this session UI.'}]);
+  const provider = state.aiProviders.find(p=>p.id===state.settings.defaultProviderId && p.enabled) || state.aiProviders.find(p=>p.enabled);
+  const send = async ()=>{
+    if(!input.trim()||busy) return; const q=input.trim(); setInput('');
+    setMsgs(m=>[...m,{role:'user',text:q}]); setBusy(true);
+    const ctx = `Subjects: ${state.subjects.map(s=>s.name).join(', ')||'none'}. Notes: ${state.notes.length}. Tasks pending: ${state.tasks.filter(t=>!t.done).length}.`;
+    try {
+      if(!provider || !provider.baseUrl){
+        throw new Error('no-provider');
+      }
+      if(provider.type==='ollama'){
+        const res = await fetch(`${provider.baseUrl.replace(/\/$/,'')}/api/chat`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model: provider.model||'llama3.1', messages:[{role:'system',content:'You are a helpful study tutor. Use the provided student context.'},{role:'user',content:`Context: ${ctx}\n\nQuestion: ${q}`}], stream:false})});
+        const data = await res.json();
+        const text = data?.message?.content || data?.response || JSON.stringify(data).slice(0,800);
+        setMsgs(m=>[...m,{role:'ai',text:`[${provider.name}/${provider.model}] ${text}`}]);
+      } else if(provider.type==='openai-compatible' || provider.type==='custom'){
+        const headers: any = {'Content-Type':'application/json'}; if(provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
+        const res = await fetch(`${provider.baseUrl.replace(/\/$/,'')}/chat/completions`, {method:'POST', headers, body: JSON.stringify({model: provider.model||'gpt-4o-mini', messages:[{role:'system',content:'You are a helpful study tutor. Use the provided student context.'},{role:'user',content:`Context: ${ctx}\n\nQuestion: ${q}`}], temperature:0.4})});
+        const data = await res.json();
+        const text = data?.choices?.[0]?.message?.content || data?.error?.message || JSON.stringify(data).slice(0,800);
+        setMsgs(m=>[...m,{role:'ai',text:`[${provider.name}/${provider.model}] ${text}`}]);
+      } else if(provider.type==='anthropic'){
+        const res = await fetch(`${provider.baseUrl.replace(/\/$/,'')}/v1/messages`, {method:'POST', headers:{'Content-Type':'application/json','x-api-key':provider.apiKey||'', 'anthropic-version':'2023-06-01'}, body: JSON.stringify({model: provider.model||'claude-3-5-sonnet-latest', max_tokens:800, messages:[{role:'user',content:`Context: ${ctx}\n\nQuestion: ${q}`}]})});
+        const data = await res.json();
+        const text = data?.content?.[0]?.text || data?.error?.message || JSON.stringify(data).slice(0,800);
+        setMsgs(m=>[...m,{role:'ai',text:`[${provider.name}/${provider.model}] ${text}`}]);
+      } else if(provider.type==='gemini'){
+        const url = `${provider.baseUrl.replace(/\/$/,'')}/v1beta/models/${encodeURIComponent(provider.model||'gemini-1.5-flash')}:generateContent?key=${encodeURIComponent(provider.apiKey||'')}`;
+        const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({contents:[{parts:[{text:`Context: ${ctx}\n\nQuestion: ${q}`}]}]})});
+        const data = await res.json();
+        const text = data?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text).join('\n') || data?.error?.message || JSON.stringify(data).slice(0,800);
+        setMsgs(m=>[...m,{role:'ai',text:`[${provider.name}/${provider.model}] ${text}`}]);
+      } else {
+        throw new Error('unsupported');
+      }
+    } catch(e:any){
+      const fallback = `Local guidance (provider unavailable/misconfigured: ${e?.message||'error'}). Subjects: ${ctx}. Steps: 1) break the question into concepts, 2) create/update a note, 3) make flashcards, 4) schedule a focus session. Configure AI providers/MCP in Settings.`;
+      setMsgs(m=>[...m,{role:'ai',text:fallback}]);
+    } finally { setBusy(false); }
+  };
+  return <div>
+    <PageHeader title="AI Tutor" subtitle={provider?`Active provider: ${provider.name} (${provider.model||'model'})`:'No provider configured — using local guidance mode'} />
+    <div className="card"><div style={{maxHeight:380, overflow:'auto', display:'flex', flexDirection:'column', gap:8}}>
+      {msgs.map((m,i)=> <div key={i} className="node" style={{alignSelf: m.role==='user'?'flex-end':'flex-start', maxWidth:'85%'}}><b>{m.role==='user'?'You':'Tutor'}</b><div style={{whiteSpace:'pre-wrap'}}>{m.text}</div></div>)}
+      {busy && <div className="muted">Thinking…</div>}
+    </div>
+    <div className="row" style={{marginTop:10}}><input style={{flex:1}} value={input} onChange={e=>setInput(e.target.value)} placeholder="Ask anything about your studies..." onKeyDown={e=>e.key==='Enter'&&send()} /><button className="btn primary" onClick={send} disabled={busy}>Send</button></div>
+    <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Calls are made directly from your browser to the configured endpoint (CORS/network must allow). API keys are stored locally on this device. For full RAG/citations and server-side tools, connect a backend in later phases.</div></div>
+  </div>;
+}
+
+function ResourceLibrary({state, upd}:{state:AppState; upd:any}) {
+  const [title,setTitle]=useState(''); const [type,setType]=useState('PDF'); const [note,setNote]=useState('');
+  return <div>
+    <PageHeader title="Resource Library" subtitle="Central library for learning materials (local metadata now; file storage/sync later)" right={<span className="pill">{state.resources.length} items</span>} />
+    <div className="grid g2">
+      <div className="card"><h3>Add resource entry</h3><div className="row"><input placeholder="Title" value={title} onChange={e=>setTitle(e.target.value)} /><select value={type} onChange={e=>setType(e.target.value)}>{['PDF','Document','Image','Audio','Video','Link','Note','Other'].map(t=> <option key={t}>{t}</option>)}</select></div>
+        <textarea placeholder="Notes / URL / description" value={note} onChange={e=>setNote(e.target.value)} />
+        <button className="btn primary" onClick={()=>{if(!title) return; upd((s:AppState)=>{s.resources.unshift({id:uid(),title,type,note,addedAt:new Date().toLocaleString()}); return s;}); setTitle(''); setNote('');}}>Add</button>
+      </div>
+      <div className="card"><h3>Resources</h3>{state.resources.length===0 ? <div className="empty">No resources yet. Add entries or create notes/mind maps/flashcards (all connected, free).</div> : <ul className="list">{state.resources.map(r=> <li key={r.id} className="node"><div className="row spread"><b>{r.title}</b><span className="tag">{r.type}</span></div><div className="muted">{r.note}</div><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.resources=s.resources.filter(x=>x.id!==r.id); return s;})}>remove</button></li>)}</ul>}</div>
     </div>
   </div>;
 }
 
 function SettingsPage({state, upd}:{state:AppState; upd:any}) {
+  const setProv = (id:string, patch:any)=> upd((s:AppState)=>{Object.assign(s.aiProviders.find(p=>p.id===id)!, patch); return s;});
+  const addProv = ()=> upd((s:AppState)=>{s.aiProviders.push({id:uid(),name:'New Provider',type:'openai-compatible',baseUrl:'',apiKey:'',model:'',enabled:true}); return s;});
+  const addMcp = ()=> upd((s:AppState)=>{s.mcpServers.push({id:uid(),name:'New MCP Server',url:'',transport:'http',enabled:false,notes:''}); return s;});
+  const setMcp = (id:string, patch:any)=> upd((s:AppState)=>{Object.assign(s.mcpServers.find(m=>m.id===id)!, patch); return s;});
   return <div>
-    <PageHeader title="Settings" subtitle="Personalization & data (full settings in later phases)" />
+    <PageHeader title="Settings" subtitle="Profile, appearance, AI providers, local models, MCP, data & backups" />
     <div className="grid g2">
-      <div className="card"><h3>Profile</h3><label className="muted">Display name</label><input value={state.settings.name} onChange={e=>upd((s:AppState)=>{s.settings.name=e.target.value; return s;})} />
-        <p style={{marginTop:10}}><span className="pill ok">Plan: All features free (open source)</span></p></div>
-      <div className="card"><h3>Appearance</h3><p className="muted">Theme: Dark (default). Light/System modes and accent customization planned.</p></div>
-      <div className="card"><h3>Data</h3><p className="muted">Local-first storage in browser. Export/backup/restore & sync planned.</p><div className="row"><button className="btn" onClick={()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='focus-deck-backup.json'; a.click();}}>Export backup (JSON)</button>
-      <button className="btn danger" onClick={()=>{if(confirm('Reset local data?')){localStorage.clear(); location.reload();}}}>Reset local data</button></div></div>
+      <div className="card"><h3>Profile & appearance</h3>
+        <label className="muted">Display name</label><input value={state.settings.name} onChange={e=>upd((s:AppState)=>{s.settings.name=e.target.value; return s;})} />
+        <div className="row" style={{marginTop:10}}><span className="muted">Theme</span>
+          {(['dark','light','system'] as const).map(t=> <button key={t} className={`btn ${state.settings.theme===t?'primary':''}`} onClick={()=>upd((s:AppState)=>{s.settings.theme=t; return s;})}>{t}</button>)}
+        </div>
+        <p style={{marginTop:10}}><span className="pill ok">All premium features: FREE</span></p>
+      </div>
+
+      <div className="card"><h3>Data, backup & privacy</h3>
+        <p className="muted">Local-first: data stored in browser localStorage on this device. API keys are saved locally (do not share backups publicly).</p>
+        <div className="row"><button className="btn" onClick={()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='focus-deck-backup.json'; a.click();}}>Export backup (JSON)</button>
+        <label className="btn">Import backup<input type="file" accept="application/json" style={{display:'none'}} onChange={async e=>{const f=e.target.files?.[0]; if(!f) return; try{const j=JSON.parse(await f.text()); localStorage.setItem('fd_state_v4', JSON.stringify(j)); location.reload();}catch{alert('Invalid backup file');}}} /></label>
+        <button className="btn danger" onClick={()=>{if(confirm('Reset all local data?')){localStorage.clear(); location.reload();}}}>Reset local data</button></div>
+      </div>
+
+      <div className="card" style={{gridColumn:'1 / -1'}}><div className="row spread"><h3>AI Providers & Local Models</h3><button className="btn primary" onClick={addProv}>+ Add provider</button></div>
+        <p className="muted">Configure API keys and endpoints (OpenAI-compatible, Anthropic, Gemini, custom) or local models (e.g. Ollama). Choose a default for AI Tutor. Keys stay on-device.</p>
+        <div className="row" style={{marginBottom:8}}><span className="muted">Default provider:</span><select value={state.settings.defaultProviderId||''} onChange={e=>upd((s:AppState)=>{s.settings.defaultProviderId=e.target.value||undefined; return s;})}><option value="">Auto (first enabled)</option>{state.aiProviders.map(p=> <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
+        {state.aiProviders.map(p=> <div key={p.id} className="node">
+          <div className="row spread"><b>{p.name}</b><label className="row muted"><input type="checkbox" checked={p.enabled} onChange={e=>setProv(p.id,{enabled:e.target.checked})}/> enabled</label></div>
+          <div className="grid g2" style={{marginTop:8}}>
+            <label>Name<input value={p.name} onChange={e=>setProv(p.id,{name:e.target.value})} /></label>
+            <label>Type<select value={p.type} onChange={e=>setProv(p.id,{type:e.target.value})}><option value="openai-compatible">OpenAI-compatible</option><option value="ollama">Local Ollama</option><option value="anthropic">Anthropic</option><option value="gemini">Gemini</option><option value="custom">Custom</option></select></label>
+            <label>Base URL<input value={p.baseUrl} onChange={e=>setProv(p.id,{baseUrl:e.target.value})} placeholder="https://api.openai.com/v1 or http://localhost:11434" /></label>
+            <label>Model<input value={p.model} onChange={e=>setProv(p.id,{model:e.target.value})} placeholder="gpt-4o-mini / llama3.1 / claude-..." /></label>
+            <label style={{gridColumn:'1 / -1'}}>API Key<input type="password" value={p.apiKey} onChange={e=>setProv(p.id,{apiKey:e.target.value})} placeholder="(stored locally; leave empty for keyless/local)" /></label>
+          </div>
+          <div className="row" style={{marginTop:8}}><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.aiProviders=s.aiProviders.filter(x=>x.id!==p.id); return s;})}>Remove provider</button></div>
+        </div>)}
+      </div>
+
+      <div className="card" style={{gridColumn:'1 / -1'}}><div className="row spread"><h3>MCP Servers & Integrations</h3><button className="btn primary" onClick={addMcp}>+ Add MCP server</button></div>
+        <p className="muted">Configure Model Context Protocol (MCP) servers for tool/context integrations. Browser-only app stores configs here; executing stdio/local MCP requires a desktop/backend bridge (planned). HTTP/SSE endpoints can be referenced for future integration.</p>
+        {state.mcpServers.length===0 && <div className="empty">No MCP servers configured.</div>}
+        {state.mcpServers.map(m=> <div key={m.id} className="node">
+          <div className="row spread"><b>{m.name||'MCP Server'}</b><label className="row muted"><input type="checkbox" checked={m.enabled} onChange={e=>setMcp(m.id,{enabled:e.target.checked})}/> enabled</label></div>
+          <div className="grid g2" style={{marginTop:8}}>
+            <label>Name<input value={m.name} onChange={e=>setMcp(m.id,{name:e.target.value})} /></label>
+            <label>Transport<select value={m.transport} onChange={e=>setMcp(m.id,{transport:e.target.value})}><option value="http">HTTP</option><option value="sse">SSE</option><option value="stdio">stdio (needs bridge)</option></select></label>
+            <label style={{gridColumn:'1 / -1'}}>URL / Endpoint<input value={m.url} onChange={e=>setMcp(m.id,{url:e.target.value})} placeholder="https://..." /></label>
+            <label>Command (stdio)<input value={m.command||''} onChange={e=>setMcp(m.id,{command:e.target.value})} /></label>
+            <label>Args (stdio)<input value={m.args||''} onChange={e=>setMcp(m.id,{args:e.target.value})} /></label>
+            <label style={{gridColumn:'1 / -1'}}>Notes<textarea value={m.notes||''} onChange={e=>setMcp(m.id,{notes:e.target.value})} /></label>
+          </div>
+          <div className="row" style={{marginTop:8}}><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.mcpServers=s.mcpServers.filter(x=>x.id!==m.id); return s;})}>Remove</button></div>
+        </div>)}
+      </div>
+
       <div className="card"><h3>About</h3><p>Focus Deck — original open-source learning workspace. No proprietary app code/assets copied. Premium-style capabilities provided free in this implementation.</p></div>
     </div>
   </div>;
 }
 
-function QuizCentre() {
-  return <SimpleModule title="Quiz Centre" icon="✅" desc="Assessment & practice (Phase 5: question bank, quiz builder, multiple types, timed/simulation, results & weak-topic analysis). Foundation: create flashcards now and practice via active recall." actions={[['Create quiz (coming)','From notes/docs/topics'],['Practice modes (coming)','Timed, weak-topic, exam simulation']]} />;
+function QuizCentre({state, upd}:{state:AppState; upd:any}) {
+  const [name,setName]=useState(''); const [prompt,setPrompt]=useState(''); const [opt,setOpt]=useState(['','','','']); const [ans,setAns]=useState(0); const [qid,setQid]=useState(state.quizzes[0]?.id||''); const [take,setTake]=useState<string|null>(null); const [idx,setIdx]=useState(0); const [score,setScore]=useState(0);
+  const quiz = state.quizzes.find(q=>q.id===qid);
+  const addQuiz = ()=>{ if(!name) return; const q={id:uid(),name,questions:[],attempts:[]}; upd((s:AppState)=>{s.quizzes.unshift(q); return s;}); setQid(q.id); setName(''); };
+  const addQ = ()=>{ if(!quiz||!prompt) return; upd((s:AppState)=>{s.quizzes.find(x=>x.id===quiz.id)!.questions.push({id:uid(),prompt,options:[...opt],answer:ans}); return s;}); setPrompt(''); setOpt(['','','','']); };
+  const start = (id:string)=>{ setTake(id); setIdx(0); setScore(0); };
+  if(take){ const tq = state.quizzes.find(q=>q.id===take); if(!tq) { setTake(null); } else if(idx>=tq.questions.length){ return <div><PageHeader title="Quiz Results" /><div className="card"><div className="kpi">{score}/{tq.questions.length}</div><p className="muted">Attempt recorded.</p><button className="btn primary" onClick={()=>{upd((s:AppState)=>{s.quizzes.find(x=>x.id===tq.id)!.attempts.unshift({id:uid(),score,total:tq.questions.length,at:new Date().toLocaleString()}); return s;}); setTake(null);}}>Save & back</button></div></div>; } else { const qu=tq.questions[idx]; return <div><PageHeader title={tq.name} subtitle={`Question ${idx+1} of ${tq.questions.length}`} /><div className="card"><h3>{qu.prompt}</h3>{qu.options.map((o,i)=><button key={i} className="btn" style={{display:'block',width:'100%',margin:'6px 0',textAlign:'left'}} onClick={()=>{ if(i===qu.answer) setScore(s=>s+1); setIdx(i2=>i2+1); }}>{o||`Option ${i+1}`}</button>)}</div></div>; } }
+  return <div>
+    <PageHeader title="Quiz Centre" subtitle="Build and take quizzes — unlimited, free (advanced types/simulation in Phase 5)" right={<div className="row"><input placeholder="New quiz name" value={name} onChange={e=>setName(e.target.value)} /><button className="btn primary" onClick={addQuiz}>Create</button></div>} />
+    <div className="grid g2">
+      <div className="card"><h3>Quizzes</h3>{state.quizzes.length===0?<div className="empty">No quizzes yet.</div>:<ul className="list">{state.quizzes.map(q=> <li key={q.id} className="node"><div className="row spread"><b>{q.name}</b><span className="muted">{q.questions.length} Q</span></div><div className="row"><button className="btn" onClick={()=>setQid(q.id)}>Edit</button><button className="btn primary" onClick={()=>start(q.id)} disabled={q.questions.length===0}>Take</button></div></li>)}</ul>}</div>
+      <div className="card"><h3>Editor</h3>{!quiz?<div className="empty">Select or create a quiz.</div>:<>
+        <p className="muted">{quiz.name} — attempts: {quiz.attempts.length}</p>
+        <input style={{width:'100%'}} placeholder="Question" value={prompt} onChange={e=>setPrompt(e.target.value)} />
+        {opt.map((o,i)=><div key={i} className="row" style={{marginTop:6}}><input type="radio" checked={ans===i} onChange={()=>setAns(i)} /><input style={{flex:1}} placeholder={`Option ${i+1}`} value={o} onChange={e=>{const n=[...opt]; n[i]=e.target.value; setOpt(n);}} /></div>)}
+        <button className="btn primary" style={{marginTop:8}} onClick={addQ}>Add question</button>
+        <ul className="list">{quiz.questions.map(qu=> <li key={qu.id}>{qu.prompt}</li>)}</ul>
+      </>}</div>
+    </div>
+  </div>;
 }
 
 function SimpleModule({title, icon, desc, actions}:{title:string; icon:string; desc:string; actions:[string,string][]}) {
