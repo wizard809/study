@@ -1,0 +1,47 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package*.json'
+      - 'capacitor.config.*'
+      - '.github/workflows/android-apk.yml'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install deps
+        run: npm ci || npm install
+      - name: Build web
+        run: npm run build
+      - name: Install Capacitor
+        run: npm install -D @capacitor/cli @capacitor/core @capacitor/android
+      - name: Init Android platform
+        run: |
+          npx cap add android || true
+          npx cap sync android
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: focus-deck-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
