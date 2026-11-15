@@ -1,0 +1,12 @@
+{
+  "name": "Focus Deck",
+  "short_name": "FocusDeck",
+  "description": "Open-source all-in-one learning workspace: planner, mind maps, focus, notes, flashcards, quizzes and more.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b1020",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

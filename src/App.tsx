@@ -154,25 +154,35 @@ function Planner({state, upd}:{state:AppState; upd:any}) {
 
 function MyLearning({state, upd}:{state:AppState; upd:any}) {
   const [sname,setSname]=useState(''); const [cname,setCname]=useState(''); const [sel,setSel]=useState(state.subjects[0]?.id||'');
-  const addS = ()=>{ if(!sname) return; const s:Subject={id:uid(),name:sname,description:'',color:'#3b82f6',icon:'📘',createdAt:now(),chapters:[]}; upd((st:AppState)=>{st.subjects.push(s); return st;}); setSname(''); setSel(s.id); };
-  const addC = ()=>{ const sub = state.subjects.find(s=>s.id===sel); if(!sub||!cname) return; const c:Chapter={id:uid(),name:cname,description:'',topics:[],completed:false}; upd((st:AppState)=>{st.subjects.find(s=>s.id===sel)!.chapters.push(c); return st;}); setCname(''); };
+  const [tname,setTname]=useState(''); const [selCh,setSelCh]=useState('');
+  const sub = state.subjects.find(s=>s.id===sel);
+  const addS = ()=>{ if(!sname) return; const ns:Subject={id:uid(),name:sname,description:'',color:'#3b82f6',icon:'📘',createdAt:now(),chapters:[]}; upd((st:AppState)=>{st.subjects.push(ns); return st;}); setSname(''); setSel(ns.id); };
+  const addC = ()=>{ if(!sub||!cname) return; const c:Chapter={id:uid(),name:cname,description:'',topics:[],completed:false}; upd((st:AppState)=>{st.subjects.find(s=>s.id===sel)!.chapters.push(c); return st;}); setCname(''); };
+  const addT = ()=>{ if(!sub||!selCh||!tname) return; upd((st:AppState)=>{st.subjects.find(s=>s.id===sel)!.chapters.find(c=>c.id===selCh)!.topics.push({id:uid(),title:tname,description:'',difficulty:'beginner',status:'not-started'}); return st;}); setTname(''); };
+  const totalTopics = state.subjects.reduce((a,s)=>a+s.chapters.reduce((b,c)=>b+c.topics.length,0),0);
+  const mastered = state.subjects.reduce((a,s)=>a+s.chapters.reduce((b,c)=>b+c.topics.filter(t=>t.status==='mastered'||t.status==='completed').length,0),0);
   return <div>
-    <PageHeader title="My Learning" subtitle="Subjects → Chapters → Topics (connected academic structure)" />
+    <PageHeader title="My Learning" subtitle="Subjects → Chapters → Topics (connected academic structure)" right={<span className="pill">{totalTopics} topics • {mastered} done/mastered</span>} />
     <div className="grid g2 section">
       <div className="card"><h3>Subjects</h3><div className="row"><input placeholder="New subject (e.g. Physics)" value={sname} onChange={e=>setSname(e.target.value)} /><button className="btn primary" onClick={addS}>Add</button></div>
-        <ul className="list">{state.subjects.map(s=> <li key={s.id}><button className={`btn ${sel===s.id?'primary':'ghost'}`} onClick={()=>setSel(s.id)}>{s.icon} {s.name}</button> <span className="muted">({s.chapters.length} chapters)</span></li>)}</ul>
+        <ul className="list">{state.subjects.map(s=> <li key={s.id} className="row spread"><button className={`btn ${sel===s.id?'primary':'ghost'}`} onClick={()=>{setSel(s.id); setSelCh('');}}>{s.icon} {s.name}</button><span className="muted">{s.chapters.length} ch</span></li>)}</ul>
+        {sub && <div style={{marginTop:10}}><label className="muted">Description</label><textarea value={sub.description} onChange={e=>upd((st:AppState)=>{st.subjects.find(s=>s.id===sel)!.description=e.target.value; return st;})} /></div>}
       </div>
-      <div className="card"><h3>Chapters & topics</h3>
-        {!state.subjects.find(s=>s.id===sel) ? <div className="empty">Select or create a subject.</div> : <>
+      <div className="card"><h3>Chapters</h3>
+        {!sub ? <div className="empty">Select or create a subject.</div> : <>
           <div className="row" style={{marginBottom:8}}><input placeholder="New chapter" value={cname} onChange={e=>setCname(e.target.value)} /><button className="btn" onClick={addC}>Add chapter</button></div>
-          {state.subjects.find(s=>s.id===sel)!.chapters.map(ch=> <div key={ch.id} className="node"><div className="row spread"><b>{ch.name}</b><label className="row muted"><input type="checkbox" checked={ch.completed} onChange={()=>upd((st:AppState)=>{const c=st.subjects.find(s=>s.id===sel)!.chapters.find(x=>x.id===ch.id)!; c.completed=!c.completed; return st;})}/> completed</label></div>
-            <div className="muted">{ch.topics.length} topics • linked resources via notes/maps/cards (foundation)</div>
-          </div>)}
-          {state.subjects.find(s=>s.id===sel)!.chapters.length===0 && <div className="empty">No chapters yet.</div>}
+          {sub.chapters.map(ch=> <div key={ch.id} className={`node ${selCh===ch.id?'active':''}`}><div className="row spread"><button className={`btn ${selCh===ch.id?'primary':'ghost'}`} onClick={()=>setSelCh(ch.id)}>{ch.name}</button><label className="row muted"><input type="checkbox" checked={ch.completed} onChange={()=>upd((st:AppState)=>{const c=st.subjects.find(s=>s.id===sel)!.chapters.find(x=>x.id===ch.id)!; c.completed=!c.completed; return st;})}/> done</label></div><div className="muted">{ch.topics.length} topics</div></div>)}
+          {sub.chapters.length===0 && <div className="empty">No chapters yet.</div>}
         </>}
       </div>
     </div>
-    <div className="card"><h3>Knowledge graph (foundation)</h3><div className="muted">Phase 1/4 foundation: subjects & chapters are structured and linkable; full visual graph, topic relations, and cross-links to docs/notes/cards/maps are planned in later phases.</div></div>
+    <div className="card section"><h3>Topics {selCh && sub ? <span className="muted">— {sub.chapters.find(c=>c.id===selCh)?.name}</span> : ''}</h3>
+      {!sub || !selCh ? <div className="empty">Select a chapter to manage topics.</div> : <>
+        <div className="row" style={{marginBottom:8}}><input placeholder="New topic/concept" value={tname} onChange={e=>setTname(e.target.value)} /><button className="btn primary" onClick={addT}>Add topic</button></div>
+        {sub.chapters.find(c=>c.id===selCh)!.topics.length===0 ? <div className="empty">No topics yet.</div> : <table><thead><tr><th>Topic</th><th>Difficulty</th><th>Status</th><th></th></tr></thead><tbody>{sub.chapters.find(c=>c.id===selCh)!.topics.map(t=> <tr key={t.id}><td><input value={t.title} onChange={e=>upd((st:AppState)=>{st.subjects.find(s=>s.id===sel)!.chapters.find(c=>c.id===selCh)!.topics.find(x=>x.id===t.id)!.title=e.target.value; return st;})} /></td><td><select value={t.difficulty} onChange={e=>upd((st:AppState)=>{st.subjects.find(s=>s.id===sel)!.chapters.find(c=>c.id===selCh)!.topics.find(x=>x.id===t.id)!.difficulty=e.target.value as any; return st;})}><option value="beginner">beginner</option><option value="intermediate">intermediate</option><option value="advanced">advanced</option></select></td><td><select value={t.status} onChange={e=>upd((st:AppState)=>{st.subjects.find(s=>s.id===sel)!.chapters.find(c=>c.id===selCh)!.topics.find(x=>x.id===t.id)!.status=e.target.value as any; return st;})}><option value="not-started">not started</option><option value="learning">learning</option><option value="completed">completed</option><option value="needs-revision">needs revision</option><option value="mastered">mastered</option></select></td><td><button className="btn danger" onClick={()=>upd((st:AppState)=>{const ch=st.subjects.find(s=>s.id===sel)!.chapters.find(c=>c.id===selCh)!; ch.topics=ch.topics.filter(x=>x.id!==t.id); return st;})}>x</button></td></tr>)}</tbody></table>}
+      </>}
+    </div>
+    <div className="card"><h3>Knowledge graph (foundation)</h3><div className="muted">Subjects, chapters, and topics are structured and stored as connected entities. Notes, flashcards, mind maps, exams, and resources can be linked to subjects (foundation). Full visual graph and cross-resource navigation planned in later phases.</div></div>
   </div>;
 }
 
