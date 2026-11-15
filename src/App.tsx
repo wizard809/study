@@ -292,24 +292,61 @@ function FocusPage({state, upd}:{state:AppState; upd:any}) {
 
 function Flashcards({state, upd}:{state:AppState; upd:any}) {
   const [front,setFront]=useState(''); const [back,setBack]=useState(''); const [deck,setDeck]=useState(state.decks[0]?.id||'');
+  const [filterDeck,setFilterDeck]=useState<string>('all');
   const [review,setReview]=useState(false); const [show,setShow]=useState(false);
+  const [editId,setEditId]=useState<string|null>(null); const [ef,setEf]=useState(''); const [eb,setEb]=useState('');
   const todayStr = new Date().toISOString().slice(0,10);
-  const due = state.flashcards.filter(c=>c.due<=todayStr);
+  const scoped = state.flashcards.filter(c=>filterDeck==='all' ? true : c.deckId===filterDeck);
+  const due = scoped.filter(c=>c.due<=todayStr);
   const current = review ? due[0] : null;
-  const add = ()=>{ if(!front||!back) return; upd((s:AppState)=>{s.flashcards.push({id:uid(),front,back,deckId:deck,due:new Date().toISOString().slice(0,10),interval:0,ease:2.5,reps:0}); return s;}); setFront(''); setBack(''); };
+  const add = ()=>{ if(!front||!back) return; const d = deck || state.decks[0]?.id; if(!d) return; upd((s:AppState)=>{s.flashcards.push({id:uid(),front,back,deckId:d,due:new Date().toISOString().slice(0,10),interval:0,ease:2.5,reps:0}); return s;}); setFront(''); setBack(''); };
   const grade = (g:number)=>{ if(!current) return; upd((s:AppState)=>{const i=s.flashcards.findIndex(x=>x.id===current.id); if(i>=0) s.flashcards[i]=reviewCard(s.flashcards[i],g); return s;}); setShow(false); };
-  if(review && current){ return <div><PageHeader title="Review session" subtitle={`${due.length} due`} right={<button className="btn" onClick={()=>setReview(false)}>Exit</button>} />
-    <div className="card"><h3>{current.front}</h3>{!show ? <button className="btn primary" onClick={()=>setShow(true)}>Show answer</button> : <><div className="node" style={{marginTop:8}}>{current.back}</div><div className="row" style={{marginTop:10}}><button className="btn danger" onClick={()=>grade(1)}>Again</button><button className="btn" onClick={()=>grade(3)}>Hard</button><button className="btn" onClick={()=>grade(4)}>Good</button><button className="btn primary" onClick={()=>grade(5)}>Easy</button></div></>}</div></div>; }
+  const addDeck = ()=>{ const name=prompt('Deck name'); if(!name) return; const d={id:uid(),name}; upd((s:AppState)=>{s.decks.push(d); return s;}); setDeck(d.id); };
+  const renameDeck = ()=>{ const d=state.decks.find(x=>x.id===deck); if(!d) return; const name=prompt('Rename deck', d.name); if(!name) return; upd((s:AppState)=>{s.decks.find(x=>x.id===deck)!.name=name; return s;}); };
+  const deleteDeck = ()=>{ if(state.decks.length<=1) return alert('Keep at least one deck.'); const d=state.decks.find(x=>x.id===deck); if(!d) return; if(!confirm(`Delete deck "${d.name}" and its cards?`)) return; upd((s:AppState)=>{s.flashcards=s.flashcards.filter(c=>c.deckId!==deck); s.decks=s.decks.filter(x=>x.id!==deck); return s;}); setDeck(state.decks.find(x=>x.id!==deck)?.id||''); setFilterDeck('all'); };
+  const genFromTopics = ()=>{
+    const d = deck || state.decks[0]?.id; if(!d) return;
+    let added=0; upd((s:AppState)=>{
+      s.subjects.forEach(sub=>sub.chapters.forEach(ch=>ch.topics.forEach(t=>{
+        const frontT=`${sub.name}: ${t.title}`; if(s.flashcards.some(c=>c.front===frontT)) return;
+        s.flashcards.push({id:uid(),front:frontT,back:t.description||`Review ${t.title} in ${ch.name}. Status: ${t.status}, difficulty: ${t.difficulty}.`,deckId:d,due:new Date().toISOString().slice(0,10),interval:0,ease:2.5,reps:0}); added++;
+      })));
+      return s;
+    });
+    alert(`Generated ${added} card(s) from topics (skipped duplicates).`);
+  };
+  if(review){
+    if(!current){ return <div><PageHeader title="Review complete" subtitle="No more due cards in this view" right={<button className="btn primary" onClick={()=>setReview(false)}>Back</button>} /><div className="card"><div className="empty">All caught up for now. Keep studying consistently.</div></div></div>; }
+    return <div><PageHeader title="Review session" subtitle={`${due.length} due in view`} right={<button className="btn" onClick={()=>setReview(false)}>Exit</button>} />
+      <div className="card"><div className="muted">Deck: {state.decks.find(d=>d.id===current.deckId)?.name||'—'} • reps {current.reps} • interval {current.interval}d</div><h3 style={{marginTop:8}}>{current.front}</h3>
+        {!show ? <button className="btn primary" onClick={()=>setShow(true)}>Show answer</button> : <><div className="node" style={{marginTop:8, whiteSpace:'pre-wrap'}}>{current.back}</div><div className="row" style={{marginTop:10}}><button className="btn danger" onClick={()=>grade(1)}>Again</button><button className="btn" onClick={()=>grade(3)}>Hard</button><button className="btn" onClick={()=>grade(4)}>Good</button><button className="btn primary" onClick={()=>grade(5)}>Easy</button></div></>}
+      </div></div>;
+  }
+  const totalDue = state.flashcards.filter(c=>c.due<=todayStr).length;
   return <div>
-    <PageHeader title="Flashcards" subtitle="Active recall with basic spaced repetition (SM-2 style) — unlimited, free" right={<button className="btn primary" onClick={()=>setReview(true)} disabled={due.length===0}>Review due ({due.length})</button>} />
+    <PageHeader title="Flashcards" subtitle="Spaced repetition (SM-2 style) — decks, generation, review (unlimited/free)" right={<span className="row"><span className="pill">Due total: {totalDue}</span><button className="btn primary" onClick={()=>setReview(true)} disabled={due.length===0}>Review due ({due.length})</button></span>} />
     <div className="grid g2 section">
-      <div className="card"><h3>Create card</h3><div className="row"><select value={deck} onChange={e=>setDeck(e.target.value)}>{state.decks.map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select><input placeholder="Deck name to add" id="nd" /><button className="btn" onClick={()=>{const el=document.getElementById('nd') as HTMLInputElement; if(el?.value){const d={id:uid(),name:el.value}; upd((s:AppState)=>{s.decks.push(d); return s;}); setDeck(d.id); el.value='';}}}>+ deck</button></div>
-        <input style={{width:'100%',marginTop:8}} placeholder="Front (question)" value={front} onChange={e=>setFront(e.target.value)} />
-        <textarea placeholder="Back (answer)" value={back} onChange={e=>setBack(e.target.value)} />
-        <button className="btn primary" onClick={add}>Add card</button>
+      <div className="card"><h3>Decks & create</h3>
+        <div className="row" style={{marginBottom:8}}><select value={deck} onChange={e=>setDeck(e.target.value)}>{state.decks.map(d=> <option key={d.id} value={d.id}>{d.name}</option>)}</select><button className="btn" onClick={addDeck}>+ deck</button><button className="btn" onClick={renameDeck}>Rename</button><button className="btn danger" onClick={deleteDeck}>Delete</button></div>
+        <input style={{width:'100%',marginBottom:8}} placeholder="Front (question/prompt)" value={front} onChange={e=>setFront(e.target.value)} />
+        <textarea placeholder="Back (answer/explanation)" value={back} onChange={e=>setBack(e.target.value)} />
+        <div className="row"><button className="btn primary" onClick={add}>Add card</button><button className="btn" onClick={genFromTopics}>Generate from topics</button></div>
       </div>
-      <div className="card"><h3>Cards ({state.flashcards.length})</h3><ul className="list">{state.flashcards.map(c=> <li key={c.id} className="node"><div className="row spread"><b>{c.front}</b><span className="tag">due {c.due}</span></div><div className="muted">{c.back}</div><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.flashcards=s.flashcards.filter(x=>x.id!==c.id); return s;})}>remove</button></li>)}{state.flashcards.length===0 && <div className="empty">No cards yet.</div>}</ul></div>
+      <div className="card"><h3>Stats</h3>
+        <ul className="list"><li>Total cards: <b>{state.flashcards.length}</b></li><li>Due now (all): <b>{totalDue}</b></li><li>Decks: <b>{state.decks.length}</b></li></ul>
+        <div style={{marginTop:10}}>{state.decks.map(d=>{const cards=state.flashcards.filter(c=>c.deckId===d.id); const dDue=cards.filter(c=>c.due<=todayStr).length; return <div key={d.id} className="row spread" style={{margin:'6px 0'}}><span>{d.name}</span><span className="muted">{cards.length} cards • {dDue} due</span></div>;})}</div>
+      </div>
     </div>
+    <div className="card"><div className="row spread"><h3>Cards ({scoped.length})</h3><div className="row"><span className="muted">Filter:</span><select value={filterDeck} onChange={e=>setFilterDeck(e.target.value)}><option value="all">All decks</option>{state.decks.map(d=> <option key={d.id} value={d.id}>{d.name}</option>)}</select></div></div>
+      <ul className="list">{scoped.map(c=> <li key={c.id} className="node">{editId===c.id ? <div>
+        <input style={{width:'100%',marginBottom:6}} value={ef} onChange={e=>setEf(e.target.value)} />
+        <textarea value={eb} onChange={e=>setEb(e.target.value)} />
+        <div className="row"><button className="btn primary" onClick={()=>{upd((s:AppState)=>{const x=s.flashcards.find(f=>f.id===c.id)!; x.front=ef; x.back=eb; return s;}); setEditId(null);}}>Save</button><button className="btn" onClick={()=>setEditId(null)}>Cancel</button></div>
+      </div> : <>
+        <div className="row spread"><b>{c.front}</b><span className="row"><span className="tag">{state.decks.find(d=>d.id===c.deckId)?.name||'deck'}</span><span className="tag">due {c.due}</span></span></div>
+        <div className="muted" style={{whiteSpace:'pre-wrap'}}>{c.back}</div>
+        <div className="row" style={{marginTop:6}}><button className="btn" onClick={()=>{setEditId(c.id); setEf(c.front); setEb(c.back);}}>Edit</button><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.flashcards=s.flashcards.filter(x=>x.id!==c.id); return s;})}>Remove</button></div>
+      </>}</li>)}{scoped.length===0 && <div className="empty">No cards in this view.</div>}</ul></div>
   </div>;
 }
 
