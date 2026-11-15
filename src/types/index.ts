@@ -57,5 +57,5 @@ export interface AppState {
   blocklist: string[];
   aiProviders: AIProvider[];
   mcpServers: MCPServer[];
-  settings: { theme: 'dark'|'light'|'system'; accent: string; name: string; defaultProviderId?: string };
+  settings: { theme: 'dark'|'light'|'system'; accent: string; name: string; defaultProviderId?: string; dailyFocusGoal?: number; dailyCardsGoal?: number; streak?: number; lastStudyDate?: string };
 }

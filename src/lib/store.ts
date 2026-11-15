@@ -36,7 +36,7 @@ export const defaultState: AppState = {
     { id: uid(), name: 'OpenAI-compatible (custom)', type: 'openai-compatible', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'gpt-4o-mini', enabled: false },
   ],
   mcpServers: [],
-  settings: { theme: 'dark', accent: '#3b82f6', name: 'Student', defaultProviderId: undefined },
+  settings: { theme: 'dark', accent: '#3b82f6', name: 'Student', defaultProviderId: undefined, dailyFocusGoal: 30, dailyCardsGoal: 20, streak: 0, lastStudyDate: undefined },
 };
 
 export function loadState(): AppState {

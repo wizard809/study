@@ -97,7 +97,7 @@ export default function App() {
           {tab==='quiz-centre' && <QuizCentre state={state} upd={upd} />}
           {tab==='focus' && <FocusPage state={state} upd={upd} />}
           {tab==='exams' && <Exams state={state} upd={upd} />}
-          {tab==='analytics' && <Analytics state={state} />}
+          {tab==='analytics' && <Analytics state={state} upd={upd} />}
           {tab==='study-groups' && <StudyGroups state={state} upd={upd} />}
           {tab==='resource-library' && <ResourceLibrary state={state} upd={upd} />}
           {tab==='settings' && <SettingsPage state={state} upd={upd} />}
@@ -164,13 +164,20 @@ function Home({state, upd, go}:{state:AppState; upd:any; go:(d:DestinationId)=>v
   const dueCards = state.flashcards.filter(c=>c.due<=todayStr).length;
   const upcoming = state.exams.filter(e=>e.date).sort((a,b)=>(a.date||'').localeCompare(b.date||'')).slice(0,3);
   const recentNotes = [...state.notes].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,4);
+  const studyDays = Array.from(new Set(state.focusSessions.map(s=> (s.at||'').slice(0,10)).filter(Boolean)));
+  const todayFocus = state.focusSessions.filter(s=> (s.at||'').startsWith(todayStr) || (s.at||'').includes(new Date().toDateString())).reduce((a,s)=>a+s.minutes,0);
+  const focusGoal = state.settings.dailyFocusGoal || 30;
+  const cardGoal = state.settings.dailyCardsGoal || 20;
+  const weakExams = state.exams.filter(e=>{const done=e.syllabus.filter(x=>x.status==='completed'||x.status==='mastered').length; const pct=e.syllabus.length?done/e.syllabus.length:1; return e.syllabus.length>0 && pct < 0.5;});
+  const needsRev = state.exams.flatMap(e=>e.syllabus.filter(sy=>sy.status==='needs-revision').map(sy=>({exam:e.name, text:sy.text}))).slice(0,4);
+  const lowQuiz = state.quizzes.find(q=>{const a=q.attempts[0]; return a && a.total>0 && (a.score/a.total)<0.6;});
   return <div>
     <PageHeader title={`Hi, ${state.settings.name}`} subtitle={`${new Date().toDateString()} • Your connected learning dashboard`} right={<><button className="btn" onClick={()=>go('notes')}>New note</button><button className="btn primary" onClick={()=>go('planner')}>Plan today</button></>} />
     <div className="grid g4 section">
       <div className="card"><div className="muted">Subjects</div><div className="kpi">{state.subjects.length}</div><button className="btn ghost" onClick={()=>go('my-learning')}>Open</button></div>
-      <div className="card"><div className="muted">Notes</div><div className="kpi">{state.notes.length}</div><button className="btn ghost" onClick={()=>go('notes')}>Open</button></div>
+      <div className="card"><div className="muted">Study days</div><div className="kpi">{studyDays.length}</div><div className="muted">{todayFocus}/{focusGoal} min today</div></div>
       <div className="card"><div className="muted">Focus minutes</div><div className="kpi">{totalMins}</div><button className="btn ghost" onClick={()=>go('focus')}>Start</button></div>
-      <div className="card"><div className="muted">Cards due</div><div className="kpi">{dueCards}</div><button className="btn ghost" onClick={()=>go('flashcards')}>Review</button></div>
+      <div className="card"><div className="muted">Cards due</div><div className="kpi">{dueCards}</div><div className="muted">goal {cardGoal}/day</div><button className="btn ghost" onClick={()=>go('flashcards')}>Review</button></div>
     </div>
     <div className="grid g2 section">
       <div className="card"><h3>Today's schedule & tasks <span className="muted">({todayTasks.length} pending)</span></h3>
@@ -180,14 +187,15 @@ function Home({state, upd, go}:{state:AppState; upd:any; go:(d:DestinationId)=>v
         </>}
         <div className="row" style={{marginTop:10}}><input id="newtask" placeholder="Quick add task" /><button className="btn" onClick={()=>{const el=document.getElementById('newtask') as HTMLInputElement; if(el?.value){upd((s:AppState)=>{s.tasks.unshift({id:uid(),title:el.value,done:false,priority:'medium'}); return s;}); el.value='';}}}>Add</button></div>
       </div>
-      <div className="card"><h3>Recommendations & next steps</h3>
+      <div className="card"><h3>Smart recommendations & workflows</h3>
         <ul className="list">
-          {dueCards>0 ? <li><b>{dueCards} cards due</b> — <button className="btn ghost" onClick={()=>go('flashcards')}>review now</button></li> : <li>No cards due. Create or review flashcards from notes.</li>}
+          {dueCards>0 ? <li><b>{dueCards} cards due</b> — <button className="btn ghost" onClick={()=>go('flashcards')}>review now</button> (spaced repetition loop)</li> : <li>No cards due. <button className="btn ghost" onClick={()=>go('flashcards')}>Generate/review cards</button> from topics/notes.</li>}
+          {weakExams[0] ? <li>Exam prep gap: <b>{weakExams[0].name}</b> has low syllabus progress — <button className="btn ghost" onClick={()=>go('exams')}>update syllabus & revise</button>.</li> : (upcoming[0] ? <li>Upcoming exam: <b>{upcoming[0].name}</b> ({upcoming[0].date}) — <button className="btn ghost" onClick={()=>go('exams')}>track readiness</button>.</li> : <li>No upcoming exam pressure detected.</li>)}
+          {needsRev[0] ? <li>Needs revision: <b>{needsRev[0].text}</b> ({needsRev[0].exam}) — create flashcards/quiz practice.</li> : null}
+          {lowQuiz ? <li>Quiz to improve: <b>{lowQuiz.name}</b> — review material and retake for mastery.</li> : <li>Use Quiz Centre to test recall after studying notes/cards.</li>}
           {todayTasks[0] ? <li>Next task: “{todayTasks[0].title}”</li> : <li>Add tasks in Planner to structure your day.</li>}
-          {upcoming[0] ? <li>Upcoming exam: <b>{upcoming[0].name}</b> ({upcoming[0].date})</li> : <li>No exams scheduled — add them in Exams.</li>}
-          {state.focusSessions.length===0 ? <li>Start a Focus session to build consistency.</li> : <li>Keep momentum: log another focus session.</li>}
         </ul>
-        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Suggestions are transparent and based on your local data.</div>
+        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Transparent suggestions from your local data (due reviews, syllabus status, attempts, tasks). No external tracking.</div>
       </div>
     </div>
     <div className="grid g2 section">
@@ -455,7 +463,7 @@ function Flashcards({state, upd}:{state:AppState; upd:any}) {
   const due = scoped.filter(c=>c.due<=todayStr);
   const current = review ? due[0] : null;
   const add = ()=>{ if(!front||!back) return; const d = deck || state.decks[0]?.id; if(!d) return; upd((s:AppState)=>{s.flashcards.push({id:uid(),front,back,deckId:d,due:new Date().toISOString().slice(0,10),interval:0,ease:2.5,reps:0}); return s;}); setFront(''); setBack(''); };
-  const grade = (g:number)=>{ if(!current) return; upd((s:AppState)=>{const i=s.flashcards.findIndex(x=>x.id===current.id); if(i>=0) s.flashcards[i]=reviewCard(s.flashcards[i],g); return s;}); setShow(false); };
+  const grade = (g:number)=>{ if(!current) return; upd((s:AppState)=>{const i=s.flashcards.findIndex(x=>x.id===current.id); if(i>=0) s.flashcards[i]=reviewCard(s.flashcards[i],g); s.settings.lastStudyDate = new Date().toISOString().slice(0,10); return s;}); setShow(false); };
   const addDeck = ()=>{ const name=prompt('Deck name'); if(!name) return; const d={id:uid(),name}; upd((s:AppState)=>{s.decks.push(d); return s;}); setDeck(d.id); };
   const renameDeck = ()=>{ const d=state.decks.find(x=>x.id===deck); if(!d) return; const name=prompt('Rename deck', d.name); if(!name) return; upd((s:AppState)=>{s.decks.find(x=>x.id===deck)!.name=name; return s;}); };
   const deleteDeck = ()=>{ if(state.decks.length<=1) return alert('Keep at least one deck.'); const d=state.decks.find(x=>x.id===deck); if(!d) return; if(!confirm(`Delete deck "${d.name}" and its cards?`)) return; upd((s:AppState)=>{s.flashcards=s.flashcards.filter(c=>c.deckId!==deck); s.decks=s.decks.filter(x=>x.id!==deck); return s;}); setDeck(state.decks.find(x=>x.id!==deck)?.id||''); setFilterDeck('all'); };
@@ -485,7 +493,7 @@ function Flashcards({state, upd}:{state:AppState; upd:any}) {
         <div className="row" style={{marginBottom:8}}><select value={deck} onChange={e=>setDeck(e.target.value)}>{state.decks.map(d=> <option key={d.id} value={d.id}>{d.name}</option>)}</select><button className="btn" onClick={addDeck}>+ deck</button><button className="btn" onClick={renameDeck}>Rename</button><button className="btn danger" onClick={deleteDeck}>Delete</button></div>
         <input style={{width:'100%',marginBottom:8}} placeholder="Front (question/prompt)" value={front} onChange={e=>setFront(e.target.value)} />
         <textarea placeholder="Back (answer/explanation)" value={back} onChange={e=>setBack(e.target.value)} />
-        <div className="row"><button className="btn primary" onClick={add}>Add card</button><button className="btn" onClick={genFromTopics}>Generate from topics</button></div>
+        <div className="row" style={{flexWrap:'wrap'}}><button className="btn primary" onClick={add}>Add card</button><button className="btn" onClick={genFromTopics}>Generate from topics</button><button className="btn" onClick={()=>{const cards = state.flashcards.filter(c=> (filterDeck==='all'? c.deckId===deck : c.deckId===filterDeck)).slice(0,20); if(cards.length===0) return alert('No cards in selected deck/view.'); const q={id:uid(),name:`Quiz: ${state.decks.find(d=>d.id===(filterDeck==='all'?deck:filterDeck))?.name||'Deck'}`,questions:cards.map(c=>{const wrong = state.flashcards.filter(x=>x.id!==c.id).slice(0,3).map(x=>x.back.slice(0,60)||'—'); const opts=[c.back.slice(0,80)||'Answer', ...wrong]; while(opts.length<4) opts.push('—'); return {id:uid(),prompt:c.front,options:opts.slice(0,4),answer:0};}),attempts:[]}; upd((s:AppState)=>{s.quizzes.unshift(q); return s;}); alert('Created a quiz from flashcards (open Quiz Centre).');}}>Create quiz from deck</button></div>
       </div>
       <div className="card"><h3>Stats</h3>
         <ul className="list"><li>Total cards: <b>{state.flashcards.length}</b></li><li>Due now (all): <b>{totalDue}</b></li><li>Decks: <b>{state.decks.length}</b></li></ul>
@@ -522,12 +530,16 @@ function Exams({state, upd}:{state:AppState; upd:any}) {
         <div className="muted" style={{marginTop:8}}>Syllabus progress {pct}% ({done}/{e.syllabus.length})</div><div className="progress"><span style={{width:`${pct}%`}}/></div>
         <div className="row" style={{marginTop:8}}><input placeholder="Add syllabus item/topic" value={item[e.id]||''} onChange={ev=>setItem(v=>({...v,[e.id]:ev.target.value}))} /><button className="btn" onClick={()=>{const txt=(item[e.id]||'').trim(); if(!txt) return; upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.syllabus.push({id:uid(),text:txt,status:'not-started'}); return s;}); setItem(v=>({...v,[e.id]:''}));}}>Add item</button></div>
         <ul className="list">{e.syllabus.map(it=> <li key={it.id} className="row spread"><span>{it.text} <span className="tag">{it.status}</span></span><span className="row"><select value={it.status} onChange={ev=>upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.syllabus.find(y=>y.id===it.id)!.status=ev.target.value as any; return s;})}><option value="not-started">not started</option><option value="learning">learning</option><option value="completed">completed</option><option value="needs-revision">needs revision</option><option value="mastered">mastered</option></select><button className="btn danger" onClick={()=>upd((s:AppState)=>{const ex=s.exams.find(x=>x.id===e.id)!; ex.syllabus=ex.syllabus.filter(y=>y.id!==it.id); return s;})}>x</button></span></li>)}</ul>
-        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Tip: link study materials in Notes/Resources, generate flashcards/quizzes from topics, and use Focus sessions to prepare.</div>
+        <div className="row" style={{marginTop:8, flexWrap:'wrap'}}>
+          <button className="btn" onClick={()=>{const needs=e.syllabus.filter(sy=>sy.status!=='completed'&&sy.status!=='mastered'); if(needs.length===0) return alert('No pending syllabus items.'); upd((s:AppState)=>{needs.slice(0,15).forEach(sy=>s.tasks.unshift({id:uid(),title:`Revise: ${sy.text} (${e.name})`,done:false,priority:'high',subjectId:e.subjectId, due:e.date||undefined})); return s;}); alert('Created revision tasks in Planner for pending syllabus items.');}}>Create revision tasks</button>
+          <button className="btn" onClick={()=>{const deckId = state.decks[0]?.id; if(!deckId) return; let added=0; upd((s:AppState)=>{e.syllabus.forEach(sy=>{const front=`${e.name}: ${sy.text}`; if(s.flashcards.some(c=>c.front===front)) return; s.flashcards.push({id:uid(),front,back:`Syllabus item for ${e.name}. Status: ${sy.status}.`,deckId,due:new Date().toISOString().slice(0,10),interval:0,ease:2.5,reps:0}); added++;}); return s;}); alert(`Generated ${added} flashcard(s) from syllabus.`);}}>Generate flashcards</button>
+        </div>
+        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Cross-module loop: track syllabus → create revision tasks/cards → practice quizzes → focus sessions → update readiness.</div>
       </div>; })}
   </div>;
 }
 
-function Analytics({state}:{state:AppState}) {
+function Analytics({state, upd}:{state:AppState; upd:any}) {
   const mins = state.focusSessions.reduce((a,s)=>a+s.minutes,0);
   const doneTasks = state.tasks.filter(t=>t.done).length;
   const todayStr = new Date().toISOString().slice(0,10);
@@ -537,25 +549,37 @@ function Analytics({state}:{state:AppState}) {
   const masteredTopics = state.subjects.reduce((a,s)=>a+s.chapters.reduce((b,c)=>b+c.topics.filter(t=>t.status==='mastered'||t.status==='completed').length,0),0);
   const totalTopics = state.subjects.reduce((a,s)=>a+s.chapters.reduce((b,c)=>b+c.topics.length,0),0);
   const upcoming = state.exams.filter(e=>e.date && e.date>=todayStr).sort((a,b)=>(a.date||'').localeCompare(b.date||''))[0];
+  const studyDays = Array.from(new Set(state.focusSessions.map(s=> (s.at||'').slice(0,10)).filter(Boolean))).length;
+  const focusGoal = state.settings.dailyFocusGoal || 30;
+  const cardGoal = state.settings.dailyCardsGoal || 20;
+  const todayFocus = state.focusSessions.filter(s=> (s.at||'').includes(new Date().toDateString()) || (s.at||'').startsWith(todayStr)).reduce((a,s)=>a+s.minutes,0);
+  const needsRevCount = state.exams.reduce((a,e)=>a+e.syllabus.filter(sy=>sy.status==='needs-revision').length,0);
   return <div>
-    <PageHeader title="Analytics" subtitle="Learning insights from connected local data (advanced charts/reports evolving)" />
+    <PageHeader title="Analytics" subtitle="Learning insights, goals & cross-module progress (from local data)" />
     <div className="grid g4 section">
-      <div className="card"><div className="muted">Study time</div><div className="kpi">{mins}m</div><div className="muted">{state.focusSessions.length} sessions</div></div>
+      <div className="card"><div className="muted">Study time</div><div className="kpi">{mins}m</div><div className="muted">{state.focusSessions.length} sessions • {studyDays} active days</div></div>
       <div className="card"><div className="muted">Tasks</div><div className="kpi">{doneTasks}/{state.tasks.length}</div><div className="muted">completed</div></div>
       <div className="card"><div className="muted">Flashcards</div><div className="kpi">{state.flashcards.length}</div><div className="muted">{dueCards} due now</div></div>
       <div className="card"><div className="muted">Quiz performance</div><div className="kpi">{avgScore!=null?`${avgScore}%`:'—'}</div><div className="muted">{quizAttempts} attempts</div></div>
     </div>
-    <div className="grid g2">
+    <div className="grid g2 section">
+      <div className="card"><h3>Goals (daily)</h3>
+        <div className="row"><label>Focus goal (min)<input type="number" min={5} value={focusGoal} onChange={e=>upd((s:AppState)=>{s.settings.dailyFocusGoal=Math.max(5,Number(e.target.value)||30); return s;})} /></label><label>Cards goal<input type="number" min={1} value={cardGoal} onChange={e=>upd((s:AppState)=>{s.settings.dailyCardsGoal=Math.max(1,Number(e.target.value)||20); return s;})} /></label></div>
+        <div style={{marginTop:10}}><div className="row spread"><span>Today focus</span><span className="muted">{todayFocus}/{focusGoal} min</span></div><div className="progress"><span style={{width:`${Math.min(100,Math.round(todayFocus/focusGoal*100))}%`}}/></div></div>
+        <div style={{marginTop:10}}><div className="row spread"><span>Cards due pressure</span><span className="muted">{dueCards} due (goal {cardGoal})</span></div><div className="progress"><span style={{width:`${Math.min(100,Math.round((cardGoal? (Math.max(0,cardGoal-dueCards)/cardGoal):1)*100))}%`}}/></div></div>
+        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Goals guide your study loops (focus → notes → flashcards → quizzes → exam readiness).</div>
+      </div>
       <div className="card"><h3>Subject & topic progress</h3><div className="muted" style={{marginBottom:8}}>Topics completed/mastered: {masteredTopics}/{totalTopics}</div>
         {state.subjects.map(s=>{const tot=s.chapters.length; const done=s.chapters.filter(c=>c.completed).length; const pct=tot?Math.round(done/tot*100):0; return <div key={s.id} style={{margin:'8px 0'}}><div className="row spread"><span>{s.icon} {s.name}</span><span className="muted">{pct}% chapters</span></div><div className="progress"><span style={{width:`${pct}%`}}/></div></div>;})}{state.subjects.length===0 && <div className="empty">Add subjects in My Learning.</div>}</div>
-      <div className="card"><h3>Insights & gaps (transparent)</h3><ul className="list">
-        <li>Knowledge base: {state.notes.length} notes, {state.mindMaps.length} mind maps, {state.resources.length} resources.</li>
-        <li>Upcoming exam: {upcoming ? <b>{upcoming.name} ({upcoming.date})</b> : 'none scheduled'}.</li>
-        <li>{dueCards>0 ? <><b>{dueCards} flashcards due</b> — review recommended.</> : 'No flashcards due right now.'}</li>
-        <li>{state.quizzes.length===0 ? 'No quizzes yet — create quizzes to measure recall.' : `Quizzes: ${state.quizzes.length} with ${quizAttempts} total attempts.`}</li>
-        <li className="muted">Metrics are computed from your recorded local activity only.</li>
-      </ul></div>
     </div>
+    <div className="card"><h3>Insights, gaps & next actions</h3><ul className="list">
+      <li>Knowledge base: {state.notes.length} notes, {state.mindMaps.length} mind maps, {state.resources.length} resources.</li>
+      <li>Upcoming exam: {upcoming ? <b>{upcoming.name} ({upcoming.date})</b> : 'none scheduled'}.</li>
+      <li>{dueCards>0 ? <><b>{dueCards} flashcards due</b> — review recommended (spaced repetition).</> : 'No flashcards due right now.'}</li>
+      <li>{needsRevCount>0 ? <><b>{needsRevCount} syllabus items marked “needs revision”</b> — convert into flashcards/quizzes and plan focus sessions.</> : 'No syllabus items flagged for revision.'}</li>
+      <li>{state.quizzes.length===0 ? 'No quizzes yet — generate quizzes from flashcards/notes to test recall.' : `Quizzes: ${state.quizzes.length} with ${quizAttempts} total attempts.`}</li>
+      <li className="muted">Metrics are computed from your recorded local activity only.</li>
+    </ul></div>
   </div>;
 }
 
@@ -820,7 +844,7 @@ function QuizCentre({state, upd}:{state:AppState; upd:any}) {
   }
 
   return <div>
-    <PageHeader title="Quiz Centre" subtitle="Create, edit and take quizzes — unlimited/free (more question types & timed simulation planned)" right={<div className="row"><input placeholder="New quiz name" value={name} onChange={e=>setName(e.target.value)} /><button className="btn primary" onClick={addQuiz}>Create quiz</button></div>} />
+    <PageHeader title="Quiz Centre" subtitle="Create, edit and take quizzes — practice loops from flashcards/topics (unlimited/free)" right={<div className="row"><input placeholder="New quiz name" value={name} onChange={e=>setName(e.target.value)} /><button className="btn primary" onClick={addQuiz}>Create quiz</button><button className="btn" onClick={()=>{if(state.flashcards.length===0) return alert('No flashcards available.'); const deckName = prompt('Generate quiz from deck name (leave empty for all cards)', '') || ''; const cards = state.flashcards.filter(c=> !deckName || state.decks.find(d=>d.id===c.deckId)?.name?.toLowerCase().includes(deckName.toLowerCase())).slice(0,20); if(cards.length===0) return alert('No matching cards.'); const q={id:uid(),name:`Quiz from ${deckName||'Flashcards'}`,questions:cards.map(c=>{const wrong = state.flashcards.filter(x=>x.id!==c.id).slice(0,3).map(x=>x.back.slice(0,60)||'—'); const opts=[c.back.slice(0,80)||'Answer', ...wrong]; while(opts.length<4) opts.push('—'); return {id:uid(),prompt:c.front,options:opts.slice(0,4),answer:0};}),attempts:[]}; upd((s:AppState)=>{s.quizzes.unshift(q); return s;}); setQid(q.id); alert('Generated quiz from flashcards (review/edit questions as needed).');}}>Generate from flashcards</button></div>} />
     <div className="grid g2">
       <div className="card"><h3>Quizzes</h3>{state.quizzes.length===0?<div className="empty">No quizzes yet. Create one to start practicing.</div>:<ul className="list">{state.quizzes.map(q=> <li key={q.id} className={`node ${qid===q.id?'active':''}`}><div className="row spread"><b>{q.name}</b><span className="muted">{q.questions.length} Q • {q.attempts.length} attempts</span></div>
         {q.attempts[0] && <div className="muted" style={{fontSize:'.85rem'}}>Last: {q.attempts[0].score}/{q.attempts[0].total} ({new Date(q.attempts[0].at).toLocaleDateString()})</div>}
