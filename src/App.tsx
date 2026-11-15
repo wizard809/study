@@ -351,16 +351,23 @@ function Flashcards({state, upd}:{state:AppState; upd:any}) {
 }
 
 function Exams({state, upd}:{state:AppState; upd:any}) {
-  const [name,setName]=useState(''); const [date,setDate]=useState(''); const [item,setItem]=useState('');
+  const [name,setName]=useState(''); const [date,setDate]=useState(''); const [subjectId,setSubjectId]=useState('');
+  const [item,setItem]=useState<Record<string,string>>({});
+  const addExam = ()=>{ if(!name) return; upd((s:AppState)=>{s.exams.push({id:uid(),name,date,subjectId:subjectId||undefined,syllabus:[],status:'planned'}); return s;}); setName(''); setDate(''); setSubjectId(''); };
   return <div>
-    <PageHeader title="Exams" subtitle="Examinations & syllabus tracker foundation (countdown, simulation in later phases)" right={<div className="row"><input placeholder="Exam name" value={name} onChange={e=>setName(e.target.value)} /><input type="date" value={date} onChange={e=>setDate(e.target.value)} /><button className="btn primary" onClick={()=>{if(!name) return; upd((s:AppState)=>{s.exams.push({id:uid(),name,date,syllabus:[],status:'planned'}); return s;}); setName('');}}>Add</button></div>} />
-    {state.exams.length===0 ? <div className="card"><div className="empty">No exams yet. Add one to track preparation.</div></div> : state.exams.map(e=> {
+    <PageHeader title="Exams" subtitle="Exam planning, syllabus tracking, countdowns & revision readiness (simulation/practice flows evolving)" right={<span className="pill">{state.exams.length} exams</span>} />
+    <div className="card section"><h3>Add exam</h3><div className="row"><input placeholder="Exam name" value={name} onChange={e=>setName(e.target.value)} /><input type="date" value={date} onChange={e=>setDate(e.target.value)} /><select value={subjectId} onChange={e=>setSubjectId(e.target.value)}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select><button className="btn primary" onClick={addExam}>Add</button></div></div>
+    {state.exams.length===0 ? <div className="card"><div className="empty">No exams yet. Add one to track preparation and syllabus progress.</div></div> : state.exams.map(e=> {
       const done = e.syllabus.filter(s=>s.status==='completed'||s.status==='mastered').length; const pct = e.syllabus.length?Math.round(done/e.syllabus.length*100):0;
       const days = e.date ? Math.ceil((new Date(e.date).getTime()-Date.now())/86400000) : null;
-      return <div key={e.id} className="card section"><div className="row spread"><h3>{e.name}</h3><span className="row"><span className="tag">{e.date||'no date'}</span>{days!=null && <span className="tag">{days>=0?`${days} days left`:'past'}</span>}<button className="btn danger" onClick={()=>upd((s:AppState)=>{s.exams=s.exams.filter(x=>x.id!==e.id); return s;})}>remove</button></span></div>
-        <div className="muted">Syllabus progress {pct}%</div><div className="progress"><span style={{width:`${pct}%`}}/></div>
-        <div className="row" style={{marginTop:8}}><input placeholder="Add syllabus item/topic" value={item} onChange={ev=>setItem(ev.target.value)} /><button className="btn" onClick={()=>{if(!item) return; upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.syllabus.push({id:uid(),text:item,status:'not-started'}); return s;}); setItem('');}}>Add item</button></div>
+      const subj = state.subjects.find(s=>s.id===e.subjectId)?.name;
+      const rev = e.syllabus.filter(s=>s.status==='needs-revision').length;
+      return <div key={e.id} className="card section"><div className="row spread"><div><h3 style={{marginBottom:4}}>{e.name}</h3><div className="row"><span className="tag">{e.date||'no date'}</span>{days!=null && <span className="tag">{days>=0?`${days} days left`:'past'}</span>}{subj && <span className="tag">{subj}</span>}{rev>0 && <span className="tag">{rev} need revision</span>}</div></div>
+        <span className="row"><select value={e.status||'planned'} onChange={ev=>upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.status=ev.target.value; return s;})}><option value="planned">planned</option><option value="preparing">preparing</option><option value="ready">ready</option><option value="completed">completed</option></select><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.exams=s.exams.filter(x=>x.id!==e.id); return s;})}>remove</button></span></div>
+        <div className="muted" style={{marginTop:8}}>Syllabus progress {pct}% ({done}/{e.syllabus.length})</div><div className="progress"><span style={{width:`${pct}%`}}/></div>
+        <div className="row" style={{marginTop:8}}><input placeholder="Add syllabus item/topic" value={item[e.id]||''} onChange={ev=>setItem(v=>({...v,[e.id]:ev.target.value}))} /><button className="btn" onClick={()=>{const txt=(item[e.id]||'').trim(); if(!txt) return; upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.syllabus.push({id:uid(),text:txt,status:'not-started'}); return s;}); setItem(v=>({...v,[e.id]:''}));}}>Add item</button></div>
         <ul className="list">{e.syllabus.map(it=> <li key={it.id} className="row spread"><span>{it.text} <span className="tag">{it.status}</span></span><span className="row"><select value={it.status} onChange={ev=>upd((s:AppState)=>{s.exams.find(x=>x.id===e.id)!.syllabus.find(y=>y.id===it.id)!.status=ev.target.value as any; return s;})}><option value="not-started">not started</option><option value="learning">learning</option><option value="completed">completed</option><option value="needs-revision">needs revision</option><option value="mastered">mastered</option></select><button className="btn danger" onClick={()=>upd((s:AppState)=>{const ex=s.exams.find(x=>x.id===e.id)!; ex.syllabus=ex.syllabus.filter(y=>y.id!==it.id); return s;})}>x</button></span></li>)}</ul>
+        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Tip: link study materials in Notes/Resources, generate flashcards/quizzes from topics, and use Focus sessions to prepare.</div>
       </div>; })}
   </div>;
 }
@@ -368,17 +375,31 @@ function Exams({state, upd}:{state:AppState; upd:any}) {
 function Analytics({state}:{state:AppState}) {
   const mins = state.focusSessions.reduce((a,s)=>a+s.minutes,0);
   const doneTasks = state.tasks.filter(t=>t.done).length;
+  const todayStr = new Date().toISOString().slice(0,10);
+  const dueCards = state.flashcards.filter(c=>c.due<=todayStr).length;
+  const quizAttempts = state.quizzes.reduce((a,q)=>a+q.attempts.length,0);
+  const avgScore = (()=>{ const all = state.quizzes.flatMap(q=>q.attempts.map(a=>a.total? a.score/a.total : 0)); return all.length? Math.round((all.reduce((x,y)=>x+y,0)/all.length)*100): null; })();
+  const masteredTopics = state.subjects.reduce((a,s)=>a+s.chapters.reduce((b,c)=>b+c.topics.filter(t=>t.status==='mastered'||t.status==='completed').length,0),0);
+  const totalTopics = state.subjects.reduce((a,s)=>a+s.chapters.reduce((b,c)=>b+c.topics.length,0),0);
+  const upcoming = state.exams.filter(e=>e.date && e.date>=todayStr).sort((a,b)=>(a.date||'').localeCompare(b.date||''))[0];
   return <div>
-    <PageHeader title="Analytics" subtitle="Learning insights from your connected data (advanced charts/reports in Phase 7)" />
+    <PageHeader title="Analytics" subtitle="Learning insights from connected local data (advanced charts/reports evolving)" />
     <div className="grid g4 section">
-      <div className="card"><div className="muted">Study time</div><div className="kpi">{mins}m</div></div>
-      <div className="card"><div className="muted">Sessions</div><div className="kpi">{state.focusSessions.length}</div></div>
-      <div className="card"><div className="muted">Tasks done</div><div className="kpi">{doneTasks}/{state.tasks.length}</div></div>
-      <div className="card"><div className="muted">Flashcards</div><div className="kpi">{state.flashcards.length}</div></div>
+      <div className="card"><div className="muted">Study time</div><div className="kpi">{mins}m</div><div className="muted">{state.focusSessions.length} sessions</div></div>
+      <div className="card"><div className="muted">Tasks</div><div className="kpi">{doneTasks}/{state.tasks.length}</div><div className="muted">completed</div></div>
+      <div className="card"><div className="muted">Flashcards</div><div className="kpi">{state.flashcards.length}</div><div className="muted">{dueCards} due now</div></div>
+      <div className="card"><div className="muted">Quiz performance</div><div className="kpi">{avgScore!=null?`${avgScore}%`:'—'}</div><div className="muted">{quizAttempts} attempts</div></div>
     </div>
     <div className="grid g2">
-      <div className="card"><h3>Subject progress (foundation)</h3>{state.subjects.map(s=>{const tot=s.chapters.length; const done=s.chapters.filter(c=>c.completed).length; const pct=tot?Math.round(done/tot*100):0; return <div key={s.id} style={{margin:'8px 0'}}><div className="row spread"><span>{s.icon} {s.name}</span><span className="muted">{pct}%</span></div><div className="progress"><span style={{width:`${pct}%`}}/></div></div>;})}{state.subjects.length===0 && <div className="empty">Add subjects in My Learning.</div>}</div>
-      <div className="card"><h3>Insights (transparent)</h3><ul className="list"><li>Study consistency: {state.focusSessions.length} logged session(s).</li><li>Knowledge base: {state.notes.length} notes, {state.mindMaps.length} mind maps.</li><li>Upcoming exams: {state.exams.length}.</li><li className="muted">Estimates are based on recorded local activity only (not claims of understanding from time alone).</li></ul></div>
+      <div className="card"><h3>Subject & topic progress</h3><div className="muted" style={{marginBottom:8}}>Topics completed/mastered: {masteredTopics}/{totalTopics}</div>
+        {state.subjects.map(s=>{const tot=s.chapters.length; const done=s.chapters.filter(c=>c.completed).length; const pct=tot?Math.round(done/tot*100):0; return <div key={s.id} style={{margin:'8px 0'}}><div className="row spread"><span>{s.icon} {s.name}</span><span className="muted">{pct}% chapters</span></div><div className="progress"><span style={{width:`${pct}%`}}/></div></div>;})}{state.subjects.length===0 && <div className="empty">Add subjects in My Learning.</div>}</div>
+      <div className="card"><h3>Insights & gaps (transparent)</h3><ul className="list">
+        <li>Knowledge base: {state.notes.length} notes, {state.mindMaps.length} mind maps, {state.resources.length} resources.</li>
+        <li>Upcoming exam: {upcoming ? <b>{upcoming.name} ({upcoming.date})</b> : 'none scheduled'}.</li>
+        <li>{dueCards>0 ? <><b>{dueCards} flashcards due</b> — review recommended.</> : 'No flashcards due right now.'}</li>
+        <li>{state.quizzes.length===0 ? 'No quizzes yet — create quizzes to measure recall.' : `Quizzes: ${state.quizzes.length} with ${quizAttempts} total attempts.`}</li>
+        <li className="muted">Metrics are computed from your recorded local activity only.</li>
+      </ul></div>
     </div>
   </div>;
 }
@@ -541,19 +562,27 @@ function QuizCentre({state, upd}:{state:AppState; upd:any}) {
   const [name,setName]=useState(''); const [prompt,setPrompt]=useState(''); const [opt,setOpt]=useState(['','','','']); const [ans,setAns]=useState(0);
   const [qid,setQid]=useState(state.quizzes[0]?.id||''); const [take,setTake]=useState<string|null>(null); const [idx,setIdx]=useState(0); const [score,setScore]=useState(0);
   const [answers,setAnswers]=useState<number[]>([]);
+  const [timeLimit,setTimeLimit]=useState(0); const [timeLeft,setTimeLeft]=useState(0); const [timedOut,setTimedOut]=useState(false);
   const quiz = state.quizzes.find(q=>q.id===qid);
   const addQuiz = ()=>{ if(!name.trim()) return; const q={id:uid(),name:name.trim(),questions:[],attempts:[]}; upd((s:AppState)=>{s.quizzes.unshift(q); return s;}); setQid(q.id); setName(''); };
   const addQ = ()=>{ if(!quiz||!prompt.trim()) return; upd((s:AppState)=>{s.quizzes.find(x=>x.id===quiz.id)!.questions.push({id:uid(),prompt:prompt.trim(),options:[...opt],answer:ans}); return s;}); setPrompt(''); setOpt(['','','','']); setAns(0); };
-  const start = (id:string)=>{ setTake(id); setIdx(0); setScore(0); setAnswers([]); };
+  const start = (id:string, timed=false)=>{ const mins = timed ? Math.max(1, Number(prompt('Minutes for this attempt?', '10')||10)) : 0; setTake(id); setIdx(0); setScore(0); setAnswers([]); setTimeLimit(mins); setTimeLeft(mins*60); setTimedOut(false); };
   const delQuiz = (id:string)=>{ if(!confirm('Delete this quiz?')) return; upd((s:AppState)=>{s.quizzes=s.quizzes.filter(q=>q.id!==id); return s;}); if(qid===id) setQid(''); };
   const delQ = (qqid:string)=>{ if(!quiz) return; upd((s:AppState)=>{const z=s.quizzes.find(x=>x.id===quiz.id)!; z.questions=z.questions.filter(q=>q.id!==qqid); return s;}); };
+
+  useEffect(()=>{
+    if(!take || timeLimit<=0) return;
+    if(timeLeft<=0){ setTimedOut(true); const tq = state.quizzes.find(q=>q.id===take); if(tq) setIdx(tq.questions.length); return; }
+    const t = setTimeout(()=>setTimeLeft(x=>x-1), 1000);
+    return ()=>clearTimeout(t);
+  }, [take, timeLimit, timeLeft, state.quizzes]);
 
   if(take){
     const tq = state.quizzes.find(q=>q.id===take);
     if(!tq){ setTake(null); }
     else if(idx>=tq.questions.length){
       const pct = tq.questions.length?Math.round(score/tq.questions.length*100):0;
-      return <div><PageHeader title="Quiz Results" subtitle={tq.name} right={<button className="btn" onClick={()=>setTake(null)}>Back</button>} />
+      return <div><PageHeader title="Quiz Results" subtitle={`${tq.name}${timedOut?' (time up)':''}`} right={<button className="btn" onClick={()=>setTake(null)}>Back</button>} />
         <div className="grid g2 section">
           <div className="card"><div className="kpi">{score}/{tq.questions.length}</div><p className="muted">{pct}% — attempt can be saved.</p>
             <div className="row"><button className="btn primary" onClick={()=>{upd((s:AppState)=>{s.quizzes.find(x=>x.id===tq.id)!.attempts.unshift({id:uid(),score,total:tq.questions.length,at:new Date().toLocaleString()}); return s;});}}>Save attempt</button><button className="btn" onClick={()=>{setTake(null);}}>Close</button></div></div>
@@ -561,7 +590,7 @@ function QuizCentre({state, upd}:{state:AppState; upd:any}) {
         </div></div>;
     } else {
       const qu=tq.questions[idx];
-      return <div><PageHeader title={tq.name} subtitle={`Question ${idx+1} of ${tq.questions.length}`} right={<button className="btn" onClick={()=>setTake(null)}>Exit</button>} />
+      const mm = Math.floor(timeLeft/60), ss = String(timeLeft%60).padStart(2,'0'); return <div><PageHeader title={tq.name} subtitle={`Question ${idx+1} of ${tq.questions.length}${timeLimit>0?` • ${mm}:${ss}`:''}`} right={<button className="btn" onClick={()=>setTake(null)}>Exit</button>} />
         <div className="card"><h3>{qu.prompt}</h3>{qu.options.map((o,i)=><button key={i} className="btn" style={{display:'block',width:'100%',margin:'6px 0',textAlign:'left'}} onClick={()=>{ const correct = i===qu.answer; if(correct) setScore(s=>s+1); setAnswers(a=>[...a,i]); setIdx(i2=>i2+1); }}>{o||`Option ${i+1}`}</button>)}</div></div>;
     }
   }
@@ -571,7 +600,7 @@ function QuizCentre({state, upd}:{state:AppState; upd:any}) {
     <div className="grid g2">
       <div className="card"><h3>Quizzes</h3>{state.quizzes.length===0?<div className="empty">No quizzes yet. Create one to start practicing.</div>:<ul className="list">{state.quizzes.map(q=> <li key={q.id} className={`node ${qid===q.id?'active':''}`}><div className="row spread"><b>{q.name}</b><span className="muted">{q.questions.length} Q • {q.attempts.length} attempts</span></div>
         {q.attempts[0] && <div className="muted" style={{fontSize:'.85rem'}}>Last: {q.attempts[0].score}/{q.attempts[0].total} ({new Date(q.attempts[0].at).toLocaleDateString()})</div>}
-        <div className="row" style={{marginTop:6}}><button className="btn" onClick={()=>setQid(q.id)}>Edit</button><button className="btn primary" onClick={()=>start(q.id)} disabled={q.questions.length===0}>Take</button><button className="btn danger" onClick={()=>delQuiz(q.id)}>Delete</button></div></li>)}</ul>}</div>
+        <div className="row" style={{marginTop:6}}><button className="btn" onClick={()=>setQid(q.id)}>Edit</button><button className="btn primary" onClick={()=>start(q.id,false)} disabled={q.questions.length===0}>Take</button><button className="btn" onClick={()=>start(q.id,true)} disabled={q.questions.length===0}>Timed</button><button className="btn danger" onClick={()=>delQuiz(q.id)}>Delete</button></div></li>)}</ul>}</div>
       <div className="card"><h3>Quiz editor</h3>{!quiz?<div className="empty">Select or create a quiz.</div>:<>
         <div className="row spread"><b>{quiz.name}</b><span className="muted">{quiz.questions.length} questions</span></div>
         <input style={{width:'100%',marginTop:8}} placeholder="Question prompt" value={prompt} onChange={e=>setPrompt(e.target.value)} />
