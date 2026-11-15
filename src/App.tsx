@@ -27,9 +27,25 @@ export default function App() {
     return g;
   }, []);
 
-  const filteredNav = NAV.filter(n => n.label.toLowerCase().includes(q.toLowerCase()));
+  const ql = q.toLowerCase().trim();
+  const filteredNav = NAV.filter(n => n.label.toLowerCase().includes(ql) || n.group.toLowerCase().includes(ql));
+  const searchHits = useMemo(() => {
+    if (!ql) return [] as {kind:string; label:string; detail:string; tab:DestinationId}[];
+    const hits: {kind:string; label:string; detail:string; tab:DestinationId}[] = [];
+    state.notes.forEach(n => { if ((n.title+n.body).toLowerCase().includes(ql)) hits.push({kind:'Note', label:n.title||'Untitled', detail:(n.body||'').slice(0,60), tab:'notes'}); });
+    state.subjects.forEach(sub => {
+      if (sub.name.toLowerCase().includes(ql)) hits.push({kind:'Subject', label:sub.name, detail:`${sub.chapters.length} chapters`, tab:'my-learning'});
+      sub.chapters.forEach(ch => { if (ch.name.toLowerCase().includes(ql)) hits.push({kind:'Chapter', label:ch.name, detail:sub.name, tab:'my-learning'}); ch.topics.forEach(t=>{ if(t.title.toLowerCase().includes(ql)) hits.push({kind:'Topic', label:t.title, detail:`${sub.name} / ${ch.name}`, tab:'my-learning'}); }); });
+    });
+    state.tasks.forEach(t => { if (t.title.toLowerCase().includes(ql)) hits.push({kind:'Task', label:t.title, detail:t.done?'done':'pending', tab:'planner'}); });
+    state.resources.forEach(r => { if ((r.title+(r.note||'')).toLowerCase().includes(ql)) hits.push({kind:'Resource', label:r.title, detail:r.type, tab:'resource-library'}); });
+    state.mindMaps.forEach(m => { if (m.name.toLowerCase().includes(ql)) hits.push({kind:'Mind Map', label:m.name, detail:'', tab:'mind-maps'}); });
+    state.quizzes.forEach(z => { if (z.name.toLowerCase().includes(ql)) hits.push({kind:'Quiz', label:z.name, detail:`${z.questions.length} questions`, tab:'quiz-centre'}); });
+    state.exams.forEach(e => { if (e.name.toLowerCase().includes(ql)) hits.push({kind:'Exam', label:e.name, detail:e.date||'', tab:'exams'}); });
+    return hits.slice(0,20);
+  }, [ql, state]);
 
-  const go = (id: DestinationId) => { setTab(id); setSidebarOpen(false); setCmdk(false); };
+  const go = (id: DestinationId) => { setTab(id); setSidebarOpen(false); setCmdk(false); setQ(''); };
 
   return (
     <div className="app-shell">
@@ -90,10 +106,13 @@ export default function App() {
 
       {cmdk && <div className="cmdk" onClick={()=>setCmdk(false)}>
         <div className="cmdk-box" onClick={e=>e.stopPropagation()}>
-          <input autoFocus placeholder="Jump to feature..." value={q} onChange={e=>setQ(e.target.value)} />
+          <input autoFocus placeholder="Search notes, subjects, tasks, resources or jump to a module..." value={q} onChange={e=>setQ(e.target.value)} />
           <div className="cmdk-list">
+            {filteredNav.length>0 && <div className="sb-group">Modules</div>}
             {filteredNav.map(n => <button key={n.id} className="cmdk-item" onClick={()=>go(n.id)}>{n.icon} {n.label} <span className="muted">— {n.group}</span></button>)}
-            {filteredNav.length===0 && <div className="empty">No results</div>}
+            {searchHits.length>0 && <div className="sb-group">Results</div>}
+            {searchHits.map((h,i) => <button key={i} className="cmdk-item" onClick={()=>go(h.tab)}><span className="tag">{h.kind}</span> {h.label} {h.detail && <span className="muted">— {h.detail}</span>}</button>)}
+            {filteredNav.length===0 && searchHits.length===0 && <div className="empty">No results</div>}
           </div>
         </div>
       </div>}
@@ -108,31 +127,39 @@ function PageHeader({title, subtitle, right}:{title:string; subtitle?:string; ri
 function Home({state, upd, go}:{state:AppState; upd:any; go:(d:DestinationId)=>void}) {
   const todayTasks = state.tasks.filter(t=>!t.done);
   const totalMins = state.focusSessions.reduce((a,s)=>a+s.minutes,0);
+  const todayStr = new Date().toISOString().slice(0,10);
+  const dueCards = state.flashcards.filter(c=>c.due<=todayStr).length;
+  const upcoming = state.exams.filter(e=>e.date).sort((a,b)=>(a.date||'').localeCompare(b.date||'')).slice(0,3);
+  const recentNotes = [...state.notes].sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)).slice(0,4);
   return <div>
-    <PageHeader title={`Hi, ${state.settings.name}`} subtitle={`${new Date().toDateString()} • Your connected learning dashboard`} right={<button className="btn primary" onClick={()=>go('planner')}>Plan today</button>} />
+    <PageHeader title={`Hi, ${state.settings.name}`} subtitle={`${new Date().toDateString()} • Your connected learning dashboard`} right={<><button className="btn" onClick={()=>go('notes')}>New note</button><button className="btn primary" onClick={()=>go('planner')}>Plan today</button></>} />
     <div className="grid g4 section">
-      <div className="card"><div className="muted">Subjects</div><div className="kpi">{state.subjects.length}</div></div>
-      <div className="card"><div className="muted">Notes</div><div className="kpi">{state.notes.length}</div></div>
-      <div className="card"><div className="muted">Focus minutes</div><div className="kpi">{totalMins}</div></div>
-      <div className="card"><div className="muted">Pending tasks</div><div className="kpi">{todayTasks.length}</div></div>
+      <div className="card"><div className="muted">Subjects</div><div className="kpi">{state.subjects.length}</div><button className="btn ghost" onClick={()=>go('my-learning')}>Open</button></div>
+      <div className="card"><div className="muted">Notes</div><div className="kpi">{state.notes.length}</div><button className="btn ghost" onClick={()=>go('notes')}>Open</button></div>
+      <div className="card"><div className="muted">Focus minutes</div><div className="kpi">{totalMins}</div><button className="btn ghost" onClick={()=>go('focus')}>Start</button></div>
+      <div className="card"><div className="muted">Cards due</div><div className="kpi">{dueCards}</div><button className="btn ghost" onClick={()=>go('flashcards')}>Review</button></div>
     </div>
     <div className="grid g2 section">
-      <div className="card"><h3>Today's schedule & tasks</h3>
+      <div className="card"><h3>Today's schedule & tasks <span className="muted">({todayTasks.length} pending)</span></h3>
         {state.timetable.length===0 && todayTasks.length===0 ? <div className="empty">No events yet. Add them in Planner.</div> : <>
-          <ul className="list">{state.timetable.slice(0,6).map(e=> <li key={e.id}><span className="tag">{e.day} {e.slot}</span> {e.title} <span className="muted">({e.subject||'General'})</span></li>)}</ul>
-          <h4 style={{margin:'10px 0 4px'}}>Tasks</h4>
-          <ul className="list">{todayTasks.slice(0,6).map(t=> <li key={t.id}><label className="row"><input type="checkbox" checked={t.done} onChange={()=>upd((s:AppState)=>{const x=s.tasks.find(i=>i.id===t.id)!; x.done=!x.done; return s;})}/> {t.title} <span className="tag">{t.priority}</span></label></li>)}</ul>
+          <ul className="list">{state.timetable.slice(0,5).map(e=> <li key={e.id}><span className="tag">{e.day} {e.slot}</span> {e.title} <span className="muted">({e.subject||'General'})</span></li>)}</ul>
+          <ul className="list">{todayTasks.slice(0,5).map(t=> <li key={t.id}><label className="row"><input type="checkbox" checked={t.done} onChange={()=>upd((s:AppState)=>{const x=s.tasks.find(i=>i.id===t.id)!; x.done=!x.done; return s;})}/> {t.title} <span className="tag">{t.priority}</span></label></li>)}</ul>
         </>}
         <div className="row" style={{marginTop:10}}><input id="newtask" placeholder="Quick add task" /><button className="btn" onClick={()=>{const el=document.getElementById('newtask') as HTMLInputElement; if(el?.value){upd((s:AppState)=>{s.tasks.unshift({id:uid(),title:el.value,done:false,priority:'medium'}); return s;}); el.value='';}}}>Add</button></div>
       </div>
-      <div className="card"><h3>AI recommendations (rule-based)</h3>
+      <div className="card"><h3>Recommendations & next steps</h3>
         <ul className="list">
-          {todayTasks[0] ? <li>Complete task “{todayTasks[0].title}” — it’s pending and helps keep momentum.</li> : <li>Plan tasks in Planner to get personalized suggestions.</li>}
-          {state.flashcards.length>0 ? <li>Review flashcards in Flashcards to strengthen memory (spaced repetition foundation).</li> : <li>Create flashcards from your notes to enable active recall.</li>}
-          {state.focusSessions.length===0 ? <li>Start a Focus session to build a study streak and feed Analytics.</li> : <li>Keep your streak: log another Focus session today.</li>}
+          {dueCards>0 ? <li><b>{dueCards} cards due</b> — <button className="btn ghost" onClick={()=>go('flashcards')}>review now</button></li> : <li>No cards due. Create or review flashcards from notes.</li>}
+          {todayTasks[0] ? <li>Next task: “{todayTasks[0].title}”</li> : <li>Add tasks in Planner to structure your day.</li>}
+          {upcoming[0] ? <li>Upcoming exam: <b>{upcoming[0].name}</b> ({upcoming[0].date})</li> : <li>No exams scheduled — add them in Exams.</li>}
+          {state.focusSessions.length===0 ? <li>Start a Focus session to build consistency.</li> : <li>Keep momentum: log another focus session.</li>}
         </ul>
-        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Recommendations are transparent and based on your local data (no external AI calls in this build).</div>
+        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Suggestions are transparent and based on your local data.</div>
       </div>
+    </div>
+    <div className="grid g2 section">
+      <div className="card"><h3>Recent notes</h3>{recentNotes.length===0 ? <div className="empty">No notes yet.</div> : <ul className="list">{recentNotes.map(n=> <li key={n.id} className="row spread"><span>{n.title||'Untitled'}</span><button className="btn ghost" onClick={()=>go('notes')}>Open</button></li>)}</ul>}</div>
+      <div className="card"><h3>Upcoming exams</h3>{upcoming.length===0 ? <div className="empty">No exams scheduled.</div> : <ul className="list">{upcoming.map(e=> <li key={e.id} className="row spread"><span><b>{e.name}</b> <span className="muted">{e.date}</span></span><button className="btn ghost" onClick={()=>go('exams')}>View</button></li>)}</ul>}</div>
     </div>
     <div className="card section"><h3>All modules</h3><div className="grid g4">{NAV.map(n=> <button key={n.id} className="btn" onClick={()=>go(n.id)} style={{justifyContent:'flex-start',display:'flex',gap:8}}><span>{n.icon}</span>{n.label}</button>)}</div></div>
   </div>;
