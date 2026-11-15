@@ -74,7 +74,7 @@ export default function App() {
           {tab==='planner' && <Planner state={state} upd={upd} />}
           {tab==='my-learning' && <MyLearning state={state} upd={upd} />}
           {tab==='notes' && <NotesPage state={state} upd={upd} />}
-          {tab==='documents' && <SimpleModule title="Documents" icon="📄" desc="Document library & research workspace (Phase 6: import, viewer, annotations, AI analysis/RAG with citations). Current foundation: organize subjects/topics and attach notes/resources." actions={[['Upload document (coming)','Store PDFs/TXT/MD and view'],['AI analysis (coming)','Summaries, concepts, Q&A with sources']]} />}
+          {tab==='documents' && <DocumentsPage state={state} upd={upd} />}
           {tab==='ai-tutor' && <AiTutor state={state} upd={upd} />}
           {tab==='flashcards' && <Flashcards state={state} upd={upd} />}
           {tab==='mind-maps' && <MindMaps state={state} upd={upd} />}
@@ -82,7 +82,7 @@ export default function App() {
           {tab==='focus' && <FocusPage state={state} upd={upd} />}
           {tab==='exams' && <Exams state={state} upd={upd} />}
           {tab==='analytics' && <Analytics state={state} />}
-          {tab==='study-groups' && <SimpleModule title="Study Groups" icon="👥" desc="Collaboration hub (Phase 8: groups, shared resources, live co-editing, group goals/challenges). Foundation: plan and share via exports/notes now; collaboration requires backend/sync." actions={[['Create group (coming)','Shared workspace & members'],['Share resources (coming)','Notes, decks, maps, plans']]} />}
+          {tab==='study-groups' && <StudyGroups state={state} upd={upd} />}
           {tab==='resource-library' && <ResourceLibrary state={state} upd={upd} />}
           {tab==='settings' && <SettingsPage state={state} upd={upd} />}
         </main>
