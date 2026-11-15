@@ -168,21 +168,53 @@ function Home({state, upd, go}:{state:AppState; upd:any; go:(d:DestinationId)=>v
 function Planner({state, upd}:{state:AppState; upd:any}) {
   const [title,setTitle]=useState(''); const [day,setDay]=useState('Mon'); const [slot,setSlot]=useState('08:00'); const [subjectId,setSubjectId]=useState(state.subjects[0]?.id||'');
   const [ttitle,setTtitle]=useState(''); const [tprio,setTprio]=useState<'low'|'medium'|'high'>('medium'); const [tdue,setTdue]=useState(''); const [tsub,setTsub]=useState('');
+  const [filterSub,setFilterSub]=useState('all'); const [repeatDays,setRepeatDays]=useState<string[]>(['Mon','Tue','Wed','Thu','Fri']);
+  const subjName = (id?:string)=> state.subjects.find(s=>s.id===id)?.name || (state.timetable.find(()=>false) as any) || '';
   const add = () => { if(!title) return; const subj = state.subjects.find(s=>s.id===subjectId)?.name || 'General'; upd((s:AppState)=>{s.timetable.push({id:uid(),day,slot,title,subject:subj,type:'study'}); return s;}); setTitle(''); };
+  const addRepeat = () => {
+    if(!title) return; const subj = state.subjects.find(s=>s.id===subjectId)?.name || 'General';
+    upd((s:AppState)=>{ repeatDays.forEach(d=> s.timetable.push({id:uid(),day:d,slot,title,subject:subj,type:'study'})); return s; });
+    setTitle('');
+  };
   const gen = () => { const samples=['Study','Revision','Practice','Reading','Review']; upd((s:AppState)=>{ days.slice(0,5).forEach((d,i)=>slots.slice(0,4).forEach((sl,j)=>s.timetable.push({id:uid(),day:d,slot:sl,title:samples[(i+j)%samples.length],subject: state.subjects[(i+j)%Math.max(1,state.subjects.length)]?.name||'General',type:'study'}))); return s;}); };
+  const clearWeek = ()=>{ if(confirm('Clear all timetable events?')) upd((s:AppState)=>{s.timetable=[]; return s;}); };
+  const editEvent = (e:TTEvent)=>{
+    const nt = prompt('Title', e.title); if(nt==null) return;
+    const nd = prompt('Day (Mon..Sun)', e.day) || e.day;
+    const ns = prompt('Time slot', e.slot) || e.slot;
+    const nsub = prompt('Subject', e.subject||'') || '';
+    upd((s:AppState)=>{ const x=s.timetable.find(i=>i.id===e.id)!; x.title=nt||x.title; x.day=days.includes(nd)?nd:x.day; x.slot=ns; x.subject=nsub; return s; });
+  };
+  const dupEvent = (e:TTEvent)=> upd((s:AppState)=>{ s.timetable.push({...e,id:uid()}); return s; });
   const addTask = ()=>{ if(!ttitle) return; upd((s:AppState)=>{s.tasks.unshift({id:uid(),title:ttitle,done:false,priority:tprio,due:tdue||undefined,subjectId:tsub||undefined}); return s;}); setTtitle(''); setTdue(''); };
-  const pending = state.tasks.filter(t=>!t.done); const done = state.tasks.filter(t=>t.done);
+  const editTask = (t:TaskItem)=>{
+    const nt = prompt('Task title', t.title); if(nt==null) return;
+    const np = (prompt('Priority (low/medium/high)', t.priority)||t.priority) as any;
+    const nd = prompt('Due date YYYY-MM-DD (empty to clear)', t.due||'') ?? t.due;
+    upd((s:AppState)=>{ const x=s.tasks.find(i=>i.id===t.id)!; x.title=nt||x.title; x.priority=['low','medium','high'].includes(np)?np:x.priority; x.due = nd?nd:undefined; return s; });
+  };
+  const pending = state.tasks.filter(t=>!t.done && (filterSub==='all' || t.subjectId===filterSub)); const done = state.tasks.filter(t=>t.done && (filterSub==='all' || t.subjectId===filterSub));
+  const events = state.timetable.filter(e=> filterSub==='all' ? true : e.subject === state.subjects.find(s=>s.id===filterSub)?.name);
+  const toggleRepeatDay = (d:string)=> setRepeatDays(r=> r.includes(d)? r.filter(x=>x!==d): [...r,d]);
   return <div>
-    <PageHeader title="Planner" subtitle="Timetable, tasks & scheduling — linked to subjects, unlimited/free" right={<><button className="btn" onClick={gen}>Generate study plan</button><button className="btn" onClick={()=>window.print()}>Export/Print</button></>} />
+    <PageHeader title="Planner" subtitle="Timetable, tasks & scheduling — edit, repeat, templates, subject-linked" right={<span className="row"><button className="btn" onClick={gen}>Generate plan</button><button className="btn" onClick={clearWeek}>Clear timetable</button><button className="btn" onClick={()=>window.print()}>Export/Print</button></span>} />
     <div className="grid g2 section">
-      <div className="card"><h3>Add timetable event</h3><div className="row"><input placeholder="Title" value={title} onChange={e=>setTitle(e.target.value)} /><select value={day} onChange={e=>setDay(e.target.value)}>{days.map(d=><option key={d}>{d}</option>)}</select><select value={slot} onChange={e=>setSlot(e.target.value)}>{slots.map(s=><option key={s}>{s}</option>)}</select><select value={subjectId} onChange={e=>setSubjectId(e.target.value)}><option value="">General</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select><button className="btn primary" onClick={add}>Add</button></div>
-        <div className="muted" style={{marginTop:8}}>Events are stored locally and editable by removing/re-adding (drag/reschedule planned).</div></div>
-      <div className="card"><h3>Add task</h3><div className="row"><input placeholder="Task title" value={ttitle} onChange={e=>setTtitle(e.target.value)} /><select value={tprio} onChange={e=>setTprio(e.target.value as any)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select><input type="date" value={tdue} onChange={e=>setTdue(e.target.value)} /><select value={tsub} onChange={e=>setTsub(e.target.value)}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select><button className="btn primary" onClick={addTask}>Add task</button></div>
-        <div style={{marginTop:10}}><b>Pending ({pending.length})</b><ul className="list">{pending.map(t=> <li key={t.id} className="row spread"><label className="row"><input type="checkbox" checked={t.done} onChange={()=>upd((s:AppState)=>{s.tasks.find(x=>x.id===t.id)!.done=!t.done; return s;})}/><span>{t.title} <span className="tag">{t.priority}</span>{t.due && <span className="muted"> due {t.due}</span>}</span></label><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.tasks=s.tasks.filter(x=>x.id!==t.id); return s;})}>x</button></li>)}{pending.length===0 && <li className="muted">No pending tasks</li>}</ul></div>
-        <div style={{marginTop:8}}><b>Completed ({done.length})</b><ul className="list">{done.slice(0,8).map(t=> <li key={t.id} className="row spread"><label className="row"><input type="checkbox" checked={t.done} onChange={()=>upd((s:AppState)=>{s.tasks.find(x=>x.id===t.id)!.done=!t.done; return s;})}/><span className="muted" style={{textDecoration:'line-through'}}>{t.title}</span></label><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.tasks=s.tasks.filter(x=>x.id!==t.id); return s;})}>x</button></li>)}</ul></div>
+      <div className="card"><h3>Add timetable event</h3>
+        <div className="row"><input placeholder="Title" value={title} onChange={e=>setTitle(e.target.value)} /><select value={day} onChange={e=>setDay(e.target.value)}>{days.map(d=><option key={d}>{d}</option>)}</select><select value={slot} onChange={e=>setSlot(e.target.value)}>{slots.map(s=><option key={s}>{s}</option>)}</select><select value={subjectId} onChange={e=>setSubjectId(e.target.value)}><option value="">General</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <div className="row" style={{marginTop:8}}><button className="btn primary" onClick={add}>Add once</button><button className="btn" onClick={addRepeat}>Add to selected days (repeat)</button></div>
+        <div className="row" style={{marginTop:8, flexWrap:'wrap'}}><span className="muted">Repeat days:</span>{days.map(d=> <label key={d} className="row" style={{gap:4}}><input type="checkbox" checked={repeatDays.includes(d)} onChange={()=>toggleRepeatDay(d)} />{d}</label>)}</div>
+        <div className="muted" style={{marginTop:8}}>Tip: click an event in the timetable to edit or duplicate it. Use subjects for stronger cross-module linkage.</div>
+      </div>
+      <div className="card"><h3>Tasks</h3>
+        <div className="row"><input placeholder="Task title" value={ttitle} onChange={e=>setTtitle(e.target.value)} /><select value={tprio} onChange={e=>setTprio(e.target.value as any)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select><input type="date" value={tdue} onChange={e=>setTdue(e.target.value)} /><select value={tsub} onChange={e=>setTsub(e.target.value)}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select><button className="btn primary" onClick={addTask}>Add</button></div>
+        <div className="row" style={{marginTop:8}}><span className="muted">Filter subject:</span><select value={filterSub} onChange={e=>setFilterSub(e.target.value)}><option value="all">All</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <div style={{marginTop:10}}><b>Pending ({pending.length})</b><ul className="list">{pending.map(t=> <li key={t.id} className="row spread"><label className="row"><input type="checkbox" checked={t.done} onChange={()=>upd((s:AppState)=>{s.tasks.find(x=>x.id===t.id)!.done=!t.done; return s;})}/><span>{t.title} <span className="tag">{t.priority}</span>{t.due && <span className="muted"> due {t.due}</span>}{t.subjectId && <span className="tag">{state.subjects.find(s=>s.id===t.subjectId)?.name}</span>}</span></label><span className="row"><button className="btn" onClick={()=>editTask(t)}>Edit</button><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.tasks=s.tasks.filter(x=>x.id!==t.id); return s;})}>x</button></span></li>)}{pending.length===0 && <li className="muted">No pending tasks</li>}</ul></div>
+        <div style={{marginTop:8}}><b>Completed ({done.length})</b><ul className="list">{done.slice(0,10).map(t=> <li key={t.id} className="row spread"><label className="row"><input type="checkbox" checked={t.done} onChange={()=>upd((s:AppState)=>{s.tasks.find(x=>x.id===t.id)!.done=!t.done; return s;})}/><span className="muted" style={{textDecoration:'line-through'}}>{t.title}</span></label><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.tasks=s.tasks.filter(x=>x.id!==t.id); return s;})}>x</button></li>)}</ul></div>
       </div>
     </div>
-    <div className="card" style={{overflow:'auto'}}><h3>Weekly timetable</h3><table><thead><tr><th>Time</th>{days.map(d=><th key={d}>{d}</th>)}</tr></thead><tbody>{slots.map(sl=> <tr key={sl}><th>{sl}</th>{days.map(d=>{const ev=state.timetable.filter(e=>e.day===d&&e.slot===sl); return <td key={d+sl}>{ev.map(e=> <div key={e.id} className="node"><div className="row spread"><span><b>{e.title}</b><div className="muted">{e.subject}</div></span><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.timetable=s.timetable.filter(x=>x.id!==e.id); return s;})}>x</button></div></div>)}{ev.length===0&&<span className="muted">—</span>}</td>;})}</tr>)}</tbody></table></div>
+    <div className="card" style={{overflow:'auto'}}><h3>Weekly timetable {filterSub!=='all' && <span className="muted">(filtered)</span>}</h3>
+      <table><thead><tr><th>Time</th>{days.map(d=><th key={d}>{d}</th>)}</tr></thead><tbody>{slots.map(sl=> <tr key={sl}><th>{sl}</th>{days.map(d=>{const ev=events.filter(e=>e.day===d&&e.slot===sl); const allInCell = state.timetable.filter(e=>e.day===d&&e.slot===sl); const show = filterSub==='all'?allInCell:ev; return <td key={d+sl}>{show.map(e=> <div key={e.id} className="node"><div className="row spread" style={{cursor:'pointer'}} onClick={()=>editEvent(e)}><span><b>{e.title}</b><div className="muted">{e.subject}</div></span></div><div className="row" style={{marginTop:4}}><button className="btn" onClick={()=>dupEvent(e)}>Dup</button><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.timetable=s.timetable.filter(x=>x.id!==e.id); return s;})}>x</button></div></div>)}{show.length===0&&<span className="muted">—</span>}</td>;})}</tr>)}</tbody></table>
+    </div>
   </div>;
 }
 
@@ -257,15 +289,82 @@ function NotesPage({state, upd}:{state:AppState; upd:any}) {
 
 function MindMaps({state, upd}:{state:AppState; upd:any}) {
   const [sel,setSel]=useState(state.mindMaps[0]?.id||'');
+  const [collapsed,setCollapsed]=useState<Record<string,boolean>>({});
   const map = state.mindMaps.find(m=>m.id===sel) || state.mindMaps[0];
   const setRoot = (r:MindNode)=> upd((s:AppState)=>{Object.assign(s.mindMaps.find(m=>m.id===map.id)!,{root:r,updatedAt:now()}); return s;});
   const updateNode = (root:MindNode,id:string,fn:(n:MindNode)=>MindNode):MindNode => root.id===id?fn(root):{...root,children:root.children.map(c=>updateNode(c,id,fn))};
   const removeNode = (root:MindNode,id:string):MindNode => ({...root,children:root.children.filter(c=>c.id!==id).map(c=>removeNode(c,id))});
-  const render = (n:MindNode): any => <div className="node" key={n.id}><div className="row spread"><b>{n.text}</b><span className="row"><button className="btn" onClick={()=>setRoot(updateNode(map.root,n.id,x=>({...x,children:[...x.children,{id:uid(),text:'New node',children:[]}]})))}>+child</button><button className="btn" onClick={()=>{const t=prompt('Text',n.text); if(t!=null) setRoot(updateNode(map.root,n.id,x=>({...x,text:t})));}}>edit</button>{n.id!==map.root.id && <button className="btn danger" onClick={()=>setRoot(removeNode(map.root,n.id))}>del</button>}</span></div>{n.children.length>0 && <div className="children">{n.children.map(render)}</div>}</div>;
+  const mapTree = (root:MindNode, parentId:string|null, fn:(n:MindNode, parent:MindNode|null, idx:number)=>MindNode):MindNode => {
+    const walk = (n:MindNode, parent:MindNode|null):MindNode => {
+      const children = n.children.map((c,i)=> fn(walk(c,n), n, i));
+      return {...n, children};
+    };
+    return walk(root, null);
+  };
+  const addChild = (id:string)=> setRoot(updateNode(map.root,id,x=>({...x,children:[...x.children,{id:uid(),text:'New node',children:[]}]})));
+  const addSibling = (nodeId:string)=>{
+    if(!map || nodeId===map.root.id) return;
+    const addToParent = (n:MindNode):MindNode => {
+      const idx = n.children.findIndex(c=>c.id===nodeId);
+      if(idx>=0){ const ch=[...n.children]; ch.splice(idx+1,0,{id:uid(),text:'New node',children:[]}); return {...n,children:ch}; }
+      return {...n, children:n.children.map(addToParent)};
+    };
+    setRoot(addToParent(map.root));
+  };
+  const moveNode = (nodeId:string, dir:-1|1)=>{
+    if(!map || nodeId===map.root.id) return;
+    const mover = (n:MindNode):MindNode => {
+      const idx = n.children.findIndex(c=>c.id===nodeId);
+      if(idx>=0){ const j=idx+dir; if(j<0||j>=n.children.length) return n; const ch=[...n.children]; [ch[idx],ch[j]]=[ch[j],ch[idx]]; return {...n,children:ch}; }
+      return {...n, children:n.children.map(mover)};
+    };
+    setRoot(mover(map.root));
+  };
+  const toOutline = (n:MindNode, depth=0):string => `${'  '.repeat(depth)}- ${n.text}\n` + n.children.map(c=>toOutline(c,depth+1)).join('');
+  const countNodes = (n:MindNode):number => 1 + n.children.reduce((a,c)=>a+countNodes(c),0);
+  const exportOutline = ()=>{ if(!map) return; const txt = `# ${map.name}\n\n${toOutline(map.root)}`; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([txt],{type:'text/markdown'})); a.download=`${map.name}.md`; a.click(); };
+  const importJson = async (file?:File|null)=>{
+    if(!file) return;
+    try{
+      const j = JSON.parse(await file.text());
+      const root = j.root || j;
+      const norm = (n:any):MindNode => ({id:n.id||uid(), text:n.text||n.title||'Node', children:Array.isArray(n.children)?n.children.map(norm):[]});
+      const m = {id:uid(), name:j.name||file.name.replace(/\.json$/i,'')||'Imported Map', root:norm(root), updatedAt:now(), subjectId:j.subjectId};
+      upd((s:AppState)=>{s.mindMaps.unshift(m); return s;}); setSel(m.id);
+    }catch{ alert('Invalid mind map JSON'); }
+  };
+  const dupMap = ()=>{ if(!map) return; const copy = JSON.parse(JSON.stringify(map)); copy.id=uid(); copy.name=`${map.name} (copy)`; copy.updatedAt=now(); upd((s:AppState)=>{s.mindMaps.unshift(copy); return s;}); setSel(copy.id); };
+  const delMap = ()=>{ if(!map || state.mindMaps.length<=1) return alert('Keep at least one map.'); if(!confirm(`Delete map "${map.name}"?`)) return; upd((s:AppState)=>{s.mindMaps=s.mindMaps.filter(m=>m.id!==map.id); return s;}); setSel(state.mindMaps.find(m=>m.id!==map.id)?.id||''); };
+
+  const render = (n:MindNode, depth=0): any => {
+    const isCol = !!collapsed[n.id];
+    return <div className="node" key={n.id} style={{marginLeft: depth?0:0}}>
+      <div className="row spread">
+        <span className="row" style={{gap:6}}>{n.children.length>0 ? <button className="btn ghost" onClick={()=>setCollapsed(c=>({...c,[n.id]:!c[n.id]}))}>{isCol?'▸':'▾'}</button> : <span style={{width:28,display:'inline-block'}}/>}<b>{n.text}</b>{n.children.length>0 && <span className="muted">({n.children.length})</span>}</span>
+        <span className="row">
+          <button className="btn" title="Add child" onClick={()=>addChild(n.id)}>+child</button>
+          {n.id!==map.root.id && <button className="btn" title="Add sibling" onClick={()=>addSibling(n.id)}>+sib</button>}
+          <button className="btn" title="Edit" onClick={()=>{const t=prompt('Node text',n.text); if(t!=null) setRoot(updateNode(map.root,n.id,x=>({...x,text:t})));}}>edit</button>
+          {n.id!==map.root.id && <button className="btn" title="Move up" onClick={()=>moveNode(n.id,-1)}>↑</button>}
+          {n.id!==map.root.id && <button className="btn" title="Move down" onClick={()=>moveNode(n.id,1)}>↓</button>}
+          {n.id!==map.root.id && <button className="btn danger" title="Delete" onClick={()=>setRoot(removeNode(map.root,n.id))}>del</button>}
+        </span>
+      </div>
+      {n.children.length>0 && !isCol && <div className="children">{n.children.map(c=>render(c, depth+1))}</div>}
+    </div>;
+  };
+
   return <div>
-    <PageHeader title="Mind Maps" subtitle="Visual thinking — unlimited maps/nodes, no locked templates (advanced canvas in Phase 4)" right={<><button className="btn" onClick={()=>{const m={id:uid(),name:`Map ${state.mindMaps.length+1}`,root:{id:uid(),text:'Central Topic',children:[]},updatedAt:now()}; upd((s:AppState)=>{s.mindMaps.unshift(m); return s;}); setSel(m.id);}}>New map</button><button className="btn primary" onClick={()=>{if(!map) return; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(map,null,2)],{type:'application/json'})); a.download=`${map.name}.json`; a.click();}}>Export JSON</button></>} />
-    <div className="card section"><div className="row"><span className="muted">Map:</span><select value={sel} onChange={e=>setSel(e.target.value)}>{state.mindMaps.map(m=> <option key={m.id} value={m.id}>{m.name}</option>)}</select>{map && <button className="btn" onClick={()=>{const n=prompt('Map name',map.name); if(n) upd((s:AppState)=>{s.mindMaps.find(x=>x.id===map.id)!.name=n; return s;});}}>Rename</button>}</div></div>
+    <PageHeader title="Mind Maps" subtitle="Visual thinking — unlimited maps, collapsible tree, outline export/import, subject linking" right={<span className="row"><button className="btn" onClick={()=>{const m={id:uid(),name:`Map ${state.mindMaps.length+1}`,root:{id:uid(),text:'Central Topic',children:[]},updatedAt:now()}; upd((s:AppState)=>{s.mindMaps.unshift(m); return s;}); setSel(m.id);}}>New</button><label className="btn">Import JSON<input type="file" accept="application/json" style={{display:'none'}} onChange={e=>importJson(e.target.files?.[0])} /></label></span>} />
+    <div className="card section"><div className="row spread" style={{flexWrap:'wrap',gap:8}}>
+      <div className="row"><span className="muted">Map:</span><select value={sel} onChange={e=>setSel(e.target.value)}>{state.mindMaps.map(m=> <option key={m.id} value={m.id}>{m.name}</option>)}</select>
+        {map && <button className="btn" onClick={()=>{const n=prompt('Map name',map.name); if(n) upd((s:AppState)=>{s.mindMaps.find(x=>x.id===map.id)!.name=n; return s;});}}>Rename</button>}
+        {map && <select value={map.subjectId||''} onChange={e=>upd((s:AppState)=>{s.mindMaps.find(x=>x.id===map.id)!.subjectId=e.target.value||undefined; return s;})}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select>}
+      </div>
+      <div className="row">{map && <span className="muted">{countNodes(map.root)} nodes</span>}<button className="btn" onClick={dupMap}>Duplicate</button><button className="btn" onClick={exportOutline}>Export outline</button><button className="btn primary" onClick={()=>{if(!map) return; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(map,null,2)],{type:'application/json'})); a.download=`${map.name}.json`; a.click();}}>Export JSON</button><button className="btn danger" onClick={delMap}>Delete map</button></div>
+    </div></div>
     {map ? <div className="card">{render(map.root)}</div> : <div className="empty">No map</div>}
+    <div className="card"><h3>Tips</h3><ul className="list"><li>Use +child/+sib, ↑/↓, and collapse/expand to structure ideas quickly.</li><li>Link maps to subjects for cross-module organization (notes/cards/quizzes can also target subjects).</li><li>Export as outline (.md) for notes or JSON to back up/import maps.</li></ul></div>
   </div>;
 }
 
