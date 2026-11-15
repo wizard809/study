@@ -538,22 +538,47 @@ function SettingsPage({state, upd}:{state:AppState; upd:any}) {
 }
 
 function QuizCentre({state, upd}:{state:AppState; upd:any}) {
-  const [name,setName]=useState(''); const [prompt,setPrompt]=useState(''); const [opt,setOpt]=useState(['','','','']); const [ans,setAns]=useState(0); const [qid,setQid]=useState(state.quizzes[0]?.id||''); const [take,setTake]=useState<string|null>(null); const [idx,setIdx]=useState(0); const [score,setScore]=useState(0);
+  const [name,setName]=useState(''); const [prompt,setPrompt]=useState(''); const [opt,setOpt]=useState(['','','','']); const [ans,setAns]=useState(0);
+  const [qid,setQid]=useState(state.quizzes[0]?.id||''); const [take,setTake]=useState<string|null>(null); const [idx,setIdx]=useState(0); const [score,setScore]=useState(0);
+  const [answers,setAnswers]=useState<number[]>([]);
   const quiz = state.quizzes.find(q=>q.id===qid);
-  const addQuiz = ()=>{ if(!name) return; const q={id:uid(),name,questions:[],attempts:[]}; upd((s:AppState)=>{s.quizzes.unshift(q); return s;}); setQid(q.id); setName(''); };
-  const addQ = ()=>{ if(!quiz||!prompt) return; upd((s:AppState)=>{s.quizzes.find(x=>x.id===quiz.id)!.questions.push({id:uid(),prompt,options:[...opt],answer:ans}); return s;}); setPrompt(''); setOpt(['','','','']); };
-  const start = (id:string)=>{ setTake(id); setIdx(0); setScore(0); };
-  if(take){ const tq = state.quizzes.find(q=>q.id===take); if(!tq) { setTake(null); } else if(idx>=tq.questions.length){ return <div><PageHeader title="Quiz Results" /><div className="card"><div className="kpi">{score}/{tq.questions.length}</div><p className="muted">Attempt recorded.</p><button className="btn primary" onClick={()=>{upd((s:AppState)=>{s.quizzes.find(x=>x.id===tq.id)!.attempts.unshift({id:uid(),score,total:tq.questions.length,at:new Date().toLocaleString()}); return s;}); setTake(null);}}>Save & back</button></div></div>; } else { const qu=tq.questions[idx]; return <div><PageHeader title={tq.name} subtitle={`Question ${idx+1} of ${tq.questions.length}`} /><div className="card"><h3>{qu.prompt}</h3>{qu.options.map((o,i)=><button key={i} className="btn" style={{display:'block',width:'100%',margin:'6px 0',textAlign:'left'}} onClick={()=>{ if(i===qu.answer) setScore(s=>s+1); setIdx(i2=>i2+1); }}>{o||`Option ${i+1}`}</button>)}</div></div>; } }
+  const addQuiz = ()=>{ if(!name.trim()) return; const q={id:uid(),name:name.trim(),questions:[],attempts:[]}; upd((s:AppState)=>{s.quizzes.unshift(q); return s;}); setQid(q.id); setName(''); };
+  const addQ = ()=>{ if(!quiz||!prompt.trim()) return; upd((s:AppState)=>{s.quizzes.find(x=>x.id===quiz.id)!.questions.push({id:uid(),prompt:prompt.trim(),options:[...opt],answer:ans}); return s;}); setPrompt(''); setOpt(['','','','']); setAns(0); };
+  const start = (id:string)=>{ setTake(id); setIdx(0); setScore(0); setAnswers([]); };
+  const delQuiz = (id:string)=>{ if(!confirm('Delete this quiz?')) return; upd((s:AppState)=>{s.quizzes=s.quizzes.filter(q=>q.id!==id); return s;}); if(qid===id) setQid(''); };
+  const delQ = (qqid:string)=>{ if(!quiz) return; upd((s:AppState)=>{const z=s.quizzes.find(x=>x.id===quiz.id)!; z.questions=z.questions.filter(q=>q.id!==qqid); return s;}); };
+
+  if(take){
+    const tq = state.quizzes.find(q=>q.id===take);
+    if(!tq){ setTake(null); }
+    else if(idx>=tq.questions.length){
+      const pct = tq.questions.length?Math.round(score/tq.questions.length*100):0;
+      return <div><PageHeader title="Quiz Results" subtitle={tq.name} right={<button className="btn" onClick={()=>setTake(null)}>Back</button>} />
+        <div className="grid g2 section">
+          <div className="card"><div className="kpi">{score}/{tq.questions.length}</div><p className="muted">{pct}% — attempt can be saved.</p>
+            <div className="row"><button className="btn primary" onClick={()=>{upd((s:AppState)=>{s.quizzes.find(x=>x.id===tq.id)!.attempts.unshift({id:uid(),score,total:tq.questions.length,at:new Date().toLocaleString()}); return s;});}}>Save attempt</button><button className="btn" onClick={()=>{setTake(null);}}>Close</button></div></div>
+          <div className="card"><h3>Review</h3><ul className="list">{tq.questions.map((qu,i)=>{const a=answers[i]; const ok=a===qu.answer; return <li key={qu.id} className="node"><b>{i+1}. {qu.prompt}</b><div className={ok?'muted':'muted'} style={{color: ok? '#86efac':'#fca5a5'}}>Your answer: {a!=null? (qu.options[a]||`Option ${a+1}`):'—'} {ok?'✓':'✗'}</div><div className="muted">Correct: {qu.options[qu.answer]||`Option ${qu.answer+1}`}</div></li>;})}</ul></div>
+        </div></div>;
+    } else {
+      const qu=tq.questions[idx];
+      return <div><PageHeader title={tq.name} subtitle={`Question ${idx+1} of ${tq.questions.length}`} right={<button className="btn" onClick={()=>setTake(null)}>Exit</button>} />
+        <div className="card"><h3>{qu.prompt}</h3>{qu.options.map((o,i)=><button key={i} className="btn" style={{display:'block',width:'100%',margin:'6px 0',textAlign:'left'}} onClick={()=>{ const correct = i===qu.answer; if(correct) setScore(s=>s+1); setAnswers(a=>[...a,i]); setIdx(i2=>i2+1); }}>{o||`Option ${i+1}`}</button>)}</div></div>;
+    }
+  }
+
   return <div>
-    <PageHeader title="Quiz Centre" subtitle="Build and take quizzes — unlimited, free (advanced types/simulation in Phase 5)" right={<div className="row"><input placeholder="New quiz name" value={name} onChange={e=>setName(e.target.value)} /><button className="btn primary" onClick={addQuiz}>Create</button></div>} />
+    <PageHeader title="Quiz Centre" subtitle="Create, edit and take quizzes — unlimited/free (more question types & timed simulation planned)" right={<div className="row"><input placeholder="New quiz name" value={name} onChange={e=>setName(e.target.value)} /><button className="btn primary" onClick={addQuiz}>Create quiz</button></div>} />
     <div className="grid g2">
-      <div className="card"><h3>Quizzes</h3>{state.quizzes.length===0?<div className="empty">No quizzes yet.</div>:<ul className="list">{state.quizzes.map(q=> <li key={q.id} className="node"><div className="row spread"><b>{q.name}</b><span className="muted">{q.questions.length} Q</span></div><div className="row"><button className="btn" onClick={()=>setQid(q.id)}>Edit</button><button className="btn primary" onClick={()=>start(q.id)} disabled={q.questions.length===0}>Take</button></div></li>)}</ul>}</div>
-      <div className="card"><h3>Editor</h3>{!quiz?<div className="empty">Select or create a quiz.</div>:<>
-        <p className="muted">{quiz.name} — attempts: {quiz.attempts.length}</p>
-        <input style={{width:'100%'}} placeholder="Question" value={prompt} onChange={e=>setPrompt(e.target.value)} />
-        {opt.map((o,i)=><div key={i} className="row" style={{marginTop:6}}><input type="radio" checked={ans===i} onChange={()=>setAns(i)} /><input style={{flex:1}} placeholder={`Option ${i+1}`} value={o} onChange={e=>{const n=[...opt]; n[i]=e.target.value; setOpt(n);}} /></div>)}
-        <button className="btn primary" style={{marginTop:8}} onClick={addQ}>Add question</button>
-        <ul className="list">{quiz.questions.map(qu=> <li key={qu.id}>{qu.prompt}</li>)}</ul>
+      <div className="card"><h3>Quizzes</h3>{state.quizzes.length===0?<div className="empty">No quizzes yet. Create one to start practicing.</div>:<ul className="list">{state.quizzes.map(q=> <li key={q.id} className={`node ${qid===q.id?'active':''}`}><div className="row spread"><b>{q.name}</b><span className="muted">{q.questions.length} Q • {q.attempts.length} attempts</span></div>
+        {q.attempts[0] && <div className="muted" style={{fontSize:'.85rem'}}>Last: {q.attempts[0].score}/{q.attempts[0].total} ({new Date(q.attempts[0].at).toLocaleDateString()})</div>}
+        <div className="row" style={{marginTop:6}}><button className="btn" onClick={()=>setQid(q.id)}>Edit</button><button className="btn primary" onClick={()=>start(q.id)} disabled={q.questions.length===0}>Take</button><button className="btn danger" onClick={()=>delQuiz(q.id)}>Delete</button></div></li>)}</ul>}</div>
+      <div className="card"><h3>Quiz editor</h3>{!quiz?<div className="empty">Select or create a quiz.</div>:<>
+        <div className="row spread"><b>{quiz.name}</b><span className="muted">{quiz.questions.length} questions</span></div>
+        <input style={{width:'100%',marginTop:8}} placeholder="Question prompt" value={prompt} onChange={e=>setPrompt(e.target.value)} />
+        {opt.map((o,i)=><div key={i} className="row" style={{marginTop:6}}><input type="radio" checked={ans===i} onChange={()=>setAns(i)} title="Correct answer" /><input style={{flex:1}} placeholder={`Option ${i+1}`} value={o} onChange={e=>{const n=[...opt]; n[i]=e.target.value; setOpt(n);}} /></div>)}
+        <div className="row" style={{marginTop:8}}><button className="btn primary" onClick={addQ}>Add question</button><span className="muted">Select the correct option</span></div>
+        <h4 style={{marginTop:12}}>Questions</h4>
+        <ul className="list">{quiz.questions.map((qu,i)=> <li key={qu.id} className="row spread"><span>{i+1}. {qu.prompt}</span><span className="row"><span className="tag">ans: {(qu.options[qu.answer]||'').slice(0,20)}</span><button className="btn danger" onClick={()=>delQ(qu.id)}>x</button></span></li>)}{quiz.questions.length===0 && <li className="muted">No questions yet.</li>}</ul>
       </>}</div>
     </div>
   </div>;
