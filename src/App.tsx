@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import { NAV } from './lib/nav';
-import { loadState, saveState, uid, now, reviewCard } from './lib/store';
+import { loadState, saveState, uid, now, reviewCard, sanitizeState, backupCurrentRaw, SCHEMA_VERSION } from './lib/store';
 import type { AppState, DestinationId, MindNode, Subject, Chapter, Note, TTEvent } from './types';
 
 const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -762,10 +762,13 @@ function SettingsPage({state, upd}:{state:AppState; upd:any}) {
       </div>
 
       <div className="card"><h3>Data, backup & privacy</h3>
-        <p className="muted">Local-first: data stored in browser localStorage on this device. API keys are saved locally (do not share backups publicly).</p>
-        <div className="row"><button className="btn" onClick={()=>{const blob=new Blob([JSON.stringify(state,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='focus-deck-backup.json'; a.click();}}>Export backup (JSON)</button>
-        <label className="btn">Import backup<input type="file" accept="application/json" style={{display:'none'}} onChange={async e=>{const f=e.target.files?.[0]; if(!f) return; try{const j=JSON.parse(await f.text()); localStorage.setItem('fd_state_v4', JSON.stringify(j)); location.reload();}catch{alert('Invalid backup file');}}} /></label>
-        <button className="btn danger" onClick={()=>{if(confirm('Reset all local data?')){localStorage.clear(); location.reload();}}}>Reset local data</button></div>
+        <p className="muted">Local-first: data stored in browser localStorage on this device. Backups may include locally saved AI API keys/MCP settings — keep backup files private and do not share them.</p>
+        <div className="row" style={{flexWrap:'wrap'}}>
+          <button className="btn" onClick={()=>{const payload={schemaVersion:SCHEMA_VERSION, exportedAt:new Date().toISOString(), app:'focus-deck', state}; const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=`focus-deck-backup-v${SCHEMA_VERSION}-${new Date().toISOString().slice(0,10)}.json`; a.click();}}>Export backup (JSON)</button>
+          <label className="btn">Import backup<input type="file" accept="application/json,.json" style={{display:'none'}} onChange={async e=>{const f=e.target.files?.[0]; (e.target as HTMLInputElement).value=''; if(!f) return; try{const txt=await f.text(); const j=JSON.parse(txt); const candidate = j && typeof j==='object' && j.state ? j.state : j; if(!candidate || typeof candidate!=='object' || Array.isArray(candidate)){ alert('Invalid backup: expected a Focus Deck state object.'); return; } if(!confirm('Importing will replace current local data on this device. A copy of your current data will be saved as a recovery backup. Continue?')) return; backupCurrentRaw(); const sanitized = sanitizeState(candidate); localStorage.setItem('fd_state_v4', JSON.stringify(sanitized)); alert('Backup imported. The app will reload.'); location.reload(); }catch(err:any){ alert('Import failed: invalid or unreadable backup file. Your existing data was not replaced.'); }}} /></label>
+          <button className="btn danger" onClick={()=>{if(confirm('Reset all local data on this device? This cannot be undone. Consider exporting a backup first.')){ if(confirm('Final confirmation: permanently clear Focus Deck local data?')){ localStorage.clear(); location.reload(); } }}}>Reset local data</button>
+        </div>
+        <div className="muted" style={{marginTop:8,fontSize:'.85rem'}}>Import validates basic structure and merges with safe defaults; a recovery copy of your previous state is kept when possible. If data becomes corrupted, the app attempts safe recovery without discarding the corrupt raw copy.</div>
       </div>
 
       <div className="card" style={{gridColumn:'1 / -1'}}><div className="row spread"><h3>AI Providers & Local Models</h3><button className="btn primary" onClick={addProv}>+ Add provider</button></div>
