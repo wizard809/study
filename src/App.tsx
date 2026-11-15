@@ -188,17 +188,26 @@ function MyLearning({state, upd}:{state:AppState; upd:any}) {
 
 function NotesPage({state, upd}:{state:AppState; upd:any}) {
   const [sel,setSel]=useState(state.notes[0]?.id||'');
-  const note = state.notes.find(n=>n.id===sel) || state.notes[0];
+  const [search,setSearch]=useState('');
+  const filtered = state.notes.filter(n=> (n.title+n.body+(n.tags||[]).join(' ')).toLowerCase().includes(search.toLowerCase()));
+  const note = state.notes.find(n=>n.id===sel) || filtered[0] || state.notes[0];
   const add = ()=>{ const n:Note={id:uid(),title:'Untitled',body:'',tags:[],updatedAt:now(),tasks:[]}; upd((s:AppState)=>{s.notes.unshift(n); return s;}); setSel(n.id); };
-  const patch = (p:Partial<Note>)=> upd((s:AppState)=>{Object.assign(s.notes.find(n=>n.id===note.id)!, p, {updatedAt:now()}); return s;});
+  const patch = (p:Partial<Note>)=> { if(!note) return; upd((s:AppState)=>{Object.assign(s.notes.find(n=>n.id===note.id)!, p, {updatedAt:now()}); return s;}); };
+  const subject = state.subjects.find(s=>s.id===note?.subjectId);
+  const chapters = subject?.chapters || [];
   return <div>
-    <PageHeader title="Notes" subtitle="Knowledge workspace — unlimited notes & tasks, local-first" right={<button className="btn primary" onClick={add}>New note</button>} />
+    <PageHeader title="Notes" subtitle="Knowledge workspace — search, link to subjects/chapters, unlimited (block editor/versioning planned)" right={<button className="btn primary" onClick={add}>New note</button>} />
     <div className="grid g2">
-      <div className="card"><h3>All notes</h3><ul className="list">{state.notes.map(n=> <li key={n.id}><button className={`btn ${n.id===note?.id?'primary':'ghost'}`} style={{width:'100%',justifyContent:'flex-start'}} onClick={()=>setSel(n.id)}>{n.title||'Untitled'}</button></li>)}</ul></div>
-      {note ? <div className="card"><input style={{width:'100%',fontWeight:700,fontSize:'1.1rem',marginBottom:8}} value={note.title} onChange={e=>patch({title:e.target.value})} />
-        <textarea style={{minHeight:180}} value={note.body} onChange={e=>patch({body:e.target.value})} placeholder="Write notes (rich block editor, links, versioning planned in Phase 2)..." />
-        <h4>Checklist</h4><button className="btn" onClick={()=>patch({tasks:[...note.tasks,{id:uid(),text:'New task',done:false}]})}>Add task</button>
-        <ul className="list">{note.tasks.map(t=> <li key={t.id} className="row"><input type="checkbox" checked={t.done} onChange={e=>patch({tasks: note.tasks.map(x=>x.id===t.id?{...x,done:e.target.checked}:x)})} /><input style={{flex:1}} value={t.text} onChange={e=>patch({tasks: note.tasks.map(x=>x.id===t.id?{...x,text:e.target.value}:x)})} /></li>)}</ul>
+      <div className="card"><h3>All notes</h3><input placeholder="Search notes..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:'100%',marginBottom:8}} />
+        <ul className="list">{filtered.map(n=> <li key={n.id}><button className={`btn ${n.id===note?.id?'primary':'ghost'}`} style={{width:'100%',justifyContent:'flex-start'}} onClick={()=>setSel(n.id)}>{n.title||'Untitled'}</button></li>)}{filtered.length===0 && <li className="muted">No matches</li>}</ul></div>
+      {note ? <div className="card"><input style={{width:'100%',fontWeight:700,fontSize:'1.1rem',marginBottom:8}} value={note.title} onChange={e=>patch({title:e.target.value})} placeholder="Title" />
+        <div className="row" style={{marginBottom:8}}>
+          <select value={note.subjectId||''} onChange={e=>patch({subjectId:e.target.value||undefined, chapterId:undefined})}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+          <select value={note.chapterId||''} onChange={e=>patch({chapterId:e.target.value||undefined})} disabled={!note.subjectId}><option value="">No chapter</option>{chapters.map(c=> <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        </div>
+        <textarea style={{minHeight:200}} value={note.body} onChange={e=>patch({body:e.target.value})} placeholder="Write notes (rich block editor, internal links, backlinks, versioning planned)..." />
+        <h4>Checklist</h4><button className="btn" onClick={()=>patch({tasks:[...(note.tasks||[]),{id:uid(),text:'New task',done:false}]})}>Add task</button>
+        <ul className="list">{(note.tasks||[]).map(t=> <li key={t.id} className="row"><input type="checkbox" checked={t.done} onChange={e=>patch({tasks: note.tasks.map(x=>x.id===t.id?{...x,done:e.target.checked}:x)})} /><input style={{flex:1}} value={t.text} onChange={e=>patch({tasks: note.tasks.map(x=>x.id===t.id?{...x,text:e.target.value}:x)})} /><button className="btn danger" onClick={()=>patch({tasks: note.tasks.filter(x=>x.id!==t.id)})}>x</button></li>)}</ul>
         <div className="row" style={{marginTop:10}}><span className="muted">Updated {new Date(note.updatedAt).toLocaleString()}</span><button className="btn danger" onClick={()=>{if(state.notes.length>1) upd((s:AppState)=>{s.notes=s.notes.filter(x=>x.id!==note.id); return s;});}}>Delete</button></div>
       </div> : <div className="card empty">No note selected</div>}
     </div>
