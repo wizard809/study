@@ -120,6 +120,39 @@ export default function App() {
   );
 }
 
+async function callAI(state: AppState, userText: string, system = 'You are a helpful study assistant. Be clear, structured, and practical.') : Promise<{ok:boolean; text:string; provider?:string}> {
+  const provider = state.aiProviders.find(p=>p.id===state.settings.defaultProviderId && p.enabled) || state.aiProviders.find(p=>p.enabled);
+  try {
+    if(!provider || !provider.baseUrl) throw new Error('No AI provider configured. Add one in Settings → AI Providers & Local Models.');
+    if(provider.type==='ollama'){
+      const res = await fetch(`${provider.baseUrl.replace(/\/$/,'')}/api/chat`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({model: provider.model||'llama3.1', messages:[{role:'system',content:system},{role:'user',content:userText}], stream:false})});
+      const data = await res.json();
+      const text = data?.message?.content || data?.response || data?.error?.message || JSON.stringify(data).slice(0,1200);
+      return {ok: !data?.error, text, provider: `${provider.name}/${provider.model}`};
+    } else if(provider.type==='openai-compatible' || provider.type==='custom'){
+      const headers: any = {'Content-Type':'application/json'}; if(provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
+      const res = await fetch(`${provider.baseUrl.replace(/\/$/,'')}/chat/completions`, {method:'POST', headers, body: JSON.stringify({model: provider.model||'gpt-4o-mini', messages:[{role:'system',content:system},{role:'user',content:userText}], temperature:0.4})});
+      const data = await res.json();
+      const text = data?.choices?.[0]?.message?.content || data?.error?.message || JSON.stringify(data).slice(0,1200);
+      return {ok: !!data?.choices?.[0]?.message?.content, text, provider: `${provider.name}/${provider.model}`};
+    } else if(provider.type==='anthropic'){
+      const res = await fetch(`${provider.baseUrl.replace(/\/$/,'')}/v1/messages`, {method:'POST', headers:{'Content-Type':'application/json','x-api-key':provider.apiKey||'', 'anthropic-version':'2023-06-01'}, body: JSON.stringify({model: provider.model||'claude-3-5-sonnet-latest', max_tokens:900, messages:[{role:'user',content:userText}], system})});
+      const data = await res.json();
+      const text = data?.content?.[0]?.text || data?.error?.message || JSON.stringify(data).slice(0,1200);
+      return {ok: !!data?.content?.[0]?.text, text, provider: `${provider.name}/${provider.model}`};
+    } else if(provider.type==='gemini'){
+      const url = `${provider.baseUrl.replace(/\/$/,'')}/v1beta/models/${encodeURIComponent(provider.model||'gemini-1.5-flash')}:generateContent?key=${encodeURIComponent(provider.apiKey||'')}`;
+      const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({contents:[{parts:[{text:`${system}\n\n${userText}`}]}]})});
+      const data = await res.json();
+      const text = data?.candidates?.[0]?.content?.parts?.map((p:any)=>p.text).join('\n') || data?.error?.message || JSON.stringify(data).slice(0,1200);
+      return {ok: !!data?.candidates?.[0], text, provider: `${provider.name}/${provider.model}`};
+    }
+    throw new Error('Unsupported provider type');
+  } catch(e:any){
+    return {ok:false, text: `AI unavailable: ${e?.message||'error'}. Configure a provider in Settings (OpenAI-compatible, Anthropic, Gemini, or local Ollama) and ensure browser/network/CORS allows access.`};
+  }
+}
+
 function PageHeader({title, subtitle, right}:{title:string; subtitle?:string; right?:any}) {
   return <div className="page-title"><div><h1>{title}</h1>{subtitle && <div className="muted">{subtitle}</div>}</div>{right && <div className="row">{right}</div>}</div>;
 }
@@ -256,6 +289,7 @@ function NotesPage({state, upd}:{state:AppState; upd:any}) {
   const [sel,setSel]=useState(state.notes[0]?.id||'');
   const [search,setSearch]=useState('');
   const [tagIn,setTagIn]=useState('');
+  const [aiBusy,setAiBusy]=useState(false);
   const filtered = state.notes.filter(n=> (n.title+n.body+(n.tags||[]).join(' ')).toLowerCase().includes(search.toLowerCase()));
   const note = state.notes.find(n=>n.id===sel) || filtered[0] || state.notes[0];
   const add = ()=>{ const n:Note={id:uid(),title:'Untitled',body:'',tags:[],updatedAt:now(),tasks:[]}; upd((s:AppState)=>{s.notes.unshift(n); return s;}); setSel(n.id); };
@@ -264,9 +298,29 @@ function NotesPage({state, upd}:{state:AppState; upd:any}) {
   const chapters = subject?.chapters || [];
   const addTag = ()=>{ if(!note||!tagIn.trim()) return; const t=tagIn.trim(); if((note.tags||[]).includes(t)){setTagIn(''); return;} patch({tags:[...(note.tags||[]), t]}); setTagIn(''); };
   const toFlash = ()=>{ if(!note) return; const deckId = state.decks[0]?.id; if(!deckId) return; upd((s:AppState)=>{s.flashcards.push({id:uid(),front:note.title||'Note',back:(note.body||'').slice(0,240)||'Empty note',deckId,due:new Date().toISOString().slice(0,10),interval:0,ease:2.5,reps:0}); return s;}); alert('Created a flashcard from this note in the first deck.'); };
+  const exportNote = ()=>{ if(!note) return; const content = `# ${note.title||'Untitled'}\n\n${note.body||''}\n`; const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([content],{type:'text/markdown'})); a.download=`${(note.title||'note').replace(/[^a-z0-9_-]+/gi,'_')}.md`; a.click(); };
+  const importText = async (file?:File|null)=>{
+    if(!file) return;
+    const text = await file.text();
+    const title = file.name.replace(/\.(txt|md|markdown|csv|json)$/i,'');
+    const n:Note={id:uid(),title,body:text.slice(0,20000),tags:[],updatedAt:now(),tasks:[]};
+    upd((s:AppState)=>{s.notes.unshift(n); return s;}); setSel(n.id);
+  };
+  const aiAssist = async ()=>{
+    if(!note || aiBusy) return;
+    const text = (note.body||'').trim();
+    if(!text){ alert('Add some note content first.'); return; }
+    setAiBusy(true);
+    const prompt = `Summarize and extract key points from this note. Return: 1) Short summary, 2) Key points (bullets), 3) Suggested study actions (flashcards/quiz/focus topics). Keep it concise.\n\nTitle: ${note.title}\n\nContent:\n${text.slice(0,6000)}`;
+    const r = await callAI(state, prompt, 'You are a helpful study assistant. Do not invent facts not supported by the note; if information is missing, say so.');
+    const block = `\n\n---\n### AI assist (${r.provider || 'local/limited'})\n${r.text}\n`;
+    patch({body: (note.body||'') + block});
+    setAiBusy(false);
+  };
   const words = (note?.body||'').trim()? (note!.body.trim().split(/\s+/).length):0;
+  const linkedResources = state.resources.filter(r=> r.subjectId && r.subjectId===note?.subjectId).slice(0,5);
   return <div>
-    <PageHeader title="Notes" subtitle="Knowledge workspace — search, tags, subject/chapter links, checklist (rich editor/versioning planned)" right={<button className="btn primary" onClick={add}>New note</button>} />
+    <PageHeader title="Notes" subtitle="Knowledge workspace — search, tags, subject links, import/export, AI-assisted actions (configurable, no RAG/citations yet)" right={<span className="row"><label className="btn">Import text<input type="file" accept=".txt,.md,.markdown,.csv,.json,text/plain,text/markdown" style={{display:'none'}} onChange={e=>importText(e.target.files?.[0])} /></label><button className="btn primary" onClick={add}>New note</button></span>} />
     <div className="grid g2">
       <div className="card"><h3>All notes <span className="muted">({state.notes.length})</span></h3><input placeholder="Search notes..." value={search} onChange={e=>setSearch(e.target.value)} style={{width:'100%',marginBottom:8}} />
         <ul className="list">{filtered.map(n=> <li key={n.id}><button className={`btn ${n.id===note?.id?'primary':'ghost'}`} style={{width:'100%',justifyContent:'flex-start'}} onClick={()=>setSel(n.id)}>{n.title||'Untitled'}</button><div className="muted" style={{fontSize:'.8rem'}}>{new Date(n.updatedAt).toLocaleDateString()} {(n.tags||[]).slice(0,2).map(t=> <span key={t} className="tag">#{t}</span>)}</div></li>)}{filtered.length===0 && <li className="muted">No matches</li>}</ul></div>
@@ -277,11 +331,13 @@ function NotesPage({state, upd}:{state:AppState; upd:any}) {
           <span className="muted">{words} words</span>
         </div>
         <div className="row" style={{marginBottom:8}}>{(note.tags||[]).map(t=> <span key={t} className="tag">#{t} <button className="btn ghost" style={{padding:'0 4px'}} onClick={()=>patch({tags: note.tags.filter(x=>x!==t)})}>x</button></span>)}<input placeholder="Add tag" value={tagIn} onChange={e=>setTagIn(e.target.value)} onKeyDown={e=>e.key==='Enter'&&addTag()} /><button className="btn" onClick={addTag}>Tag</button></div>
-        <textarea style={{minHeight:220}} value={note.body} onChange={e=>patch({body:e.target.value})} placeholder="Write notes (rich block editor, internal links, backlinks, versioning planned)..." />
-        <div className="row" style={{margin:'8px 0'}}><button className="btn" onClick={toFlash}>Create flashcard from note</button></div>
+        <textarea style={{minHeight:260}} value={note.body} onChange={e=>patch({body:e.target.value})} placeholder="Write notes... (rich block editor, internal links/backlinks, versioning planned)" />
+        <div className="row" style={{margin:'8px 0', flexWrap:'wrap'}}><button className="btn" onClick={toFlash}>Create flashcard</button><button className="btn" onClick={exportNote}>Export .md</button><button className="btn" onClick={aiAssist} disabled={aiBusy}>{aiBusy?'AI working...':'AI summarize/key points'}</button></div>
+        {linkedResources.length>0 && <div className="muted" style={{marginBottom:8}}>Linked resources (same subject): {linkedResources.map(r=> <span key={r.id} className="tag">{r.title}</span>)}</div>}
         <h4>Checklist</h4><button className="btn" onClick={()=>patch({tasks:[...(note.tasks||[]),{id:uid(),text:'New task',done:false}]})}>Add task</button>
         <ul className="list">{(note.tasks||[]).map(t=> <li key={t.id} className="row"><input type="checkbox" checked={t.done} onChange={e=>patch({tasks: note.tasks.map(x=>x.id===t.id?{...x,done:e.target.checked}:x)})} /><input style={{flex:1}} value={t.text} onChange={e=>patch({tasks: note.tasks.map(x=>x.id===t.id?{...x,text:e.target.value}:x)})} /><button className="btn danger" onClick={()=>patch({tasks: note.tasks.filter(x=>x.id!==t.id)})}>x</button></li>)}</ul>
         <div className="row" style={{marginTop:10}}><span className="muted">Updated {new Date(note.updatedAt).toLocaleString()}</span><button className="btn danger" onClick={()=>{if(state.notes.length>1) upd((s:AppState)=>{s.notes=s.notes.filter(x=>x.id!==note.id); return s;});}}>Delete</button></div>
+        <div className="muted" style={{marginTop:8,fontSize:'.8rem'}}>AI actions use your configured provider (if any) on provided text; results may be imperfect. No document ingestion/indexing, citations, or RAG over your library yet.</div>
       </div> : <div className="card empty">No note selected</div>}
     </div>
   </div>;
@@ -504,16 +560,62 @@ function Analytics({state}:{state:AppState}) {
 }
 
 function DocumentsPage({state, upd}:{state:AppState; upd:any}) {
-  const [title,setTitle]=useState(''); const [type,setType]=useState('PDF');
+  const [title,setTitle]=useState(''); const [type,setType]=useState('PDF'); const [subjectId,setSubjectId]=useState(''); const [sel,setSel]=useState<string|null>(null); const [q,setQ]=useState(''); const [aiBusy,setAiBusy]=useState(false);
+  const isDoc = (r:ResourceItem)=>['PDF','Document','TXT','Markdown','Link'].includes(r.type);
+  const docs = state.resources.filter(isDoc).filter(r=> (r.title+(r.note||'')+(r.content||'')).toLowerCase().includes(q.toLowerCase()));
+  const selected = state.resources.find(r=>r.id===sel) || docs[0] || null;
+  const addEntry = ()=>{ if(!title) return; upd((s:AppState)=>{s.resources.unshift({id:uid(),title,type,subjectId:subjectId||undefined,addedAt:new Date().toLocaleString(),note:''}); return s;}); setTitle(''); };
+  const importFile = async (file?:File|null)=>{
+    if(!file) return;
+    const name = file.name; const lower = name.toLowerCase();
+    let t = type; if(lower.endsWith('.md')||lower.endsWith('.markdown')) t='Markdown'; else if(lower.endsWith('.txt')||lower.endsWith('.csv')||lower.endsWith('.json')) t='TXT'; else if(lower.endsWith('.pdf')) t='PDF'; else t='Document';
+    let content = '';
+    if(t==='TXT' || t==='Markdown' || lower.endsWith('.csv') || lower.endsWith('.json')){
+      try{ content = (await file.text()).slice(0,30000); }catch{}
+    } else if(t==='PDF'){
+      content = '[PDF file selected — browser-side text extraction/viewer is not yet implemented. Store this entry, add notes/links, or import extracted text as a TXT/Markdown note.]';
+    } else {
+      content = '[Binary/document file selected — full viewer/storage not yet implemented in this local-first build. Metadata stored; attach notes or links below.]';
+    }
+    const r:ResourceItem = {id:uid(), title:name.replace(/\.[^.]+$/,''), type:t, subjectId:subjectId||undefined, fileName:name, content, note:'', addedAt:new Date().toLocaleString()};
+    upd((s:AppState)=>{s.resources.unshift(r); return s;}); setSel(r.id);
+  };
+  const createNoteFrom = (r:ResourceItem)=>{
+    const body = (r.content && !r.content.startsWith('[')) ? r.content : (r.note || `Source: ${r.title} (${r.type})${r.url?`\nURL: ${r.url}`:''}`);
+    const n:Note = {id:uid(), title:`Notes: ${r.title}`, body, tags:[], updatedAt:now(), tasks:[], subjectId:r.subjectId};
+    upd((s:AppState)=>{s.notes.unshift(n); return s;}); alert('Created a note from this document/resource (open Notes).');
+  };
+  const aiSummarize = async (r:ResourceItem)=>{
+    const text = (r.content && !r.content.startsWith('[') ? r.content : (r.note||'')).trim();
+    if(!text){ alert('No extracted text to summarize. Import TXT/Markdown content or add notes first.'); return; }
+    setAiBusy(true);
+    const res = await callAI(state, `Summarize this document and list key concepts, important points, and study questions.\n\nTitle: ${r.title}\nType: ${r.type}\n\nContent:\n${text.slice(0,7000)}`, 'You are a study assistant. Base your response on the provided text; do not claim access to external sources or citations you cannot show.');
+    upd((s:AppState)=>{ const x=s.resources.find(i=>i.id===r.id); if(x) x.note = (x.note? x.note+'\n\n':'') + `AI summary (${res.provider||'limited'}):\n${res.text}`; return s; });
+    setAiBusy(false);
+  };
   return <div>
-    <PageHeader title="Documents" subtitle="Document library foundation (upload/viewer/annotations/RAG in later phases). Track and link documents to subjects now." right={<span className="pill">{state.resources.filter(r=>['PDF','Document','TXT','Markdown'].includes(r.type)).length} docs</span>} />
+    <PageHeader title="Documents" subtitle="Document library & import foundations (browser-side text import, linking, AI assist on provided text). Full PDF viewer/extraction, storage, annotations & RAG/citations planned." right={<span className="pill">{docs.length} docs</span>} />
     <div className="grid g2">
-      <div className="card"><h3>Add document entry</h3><p className="muted">Full file import/viewer pipeline requires storage backend; add metadata/links now.</p>
-        <div className="row"><input placeholder="Document title" value={title} onChange={e=>setTitle(e.target.value)} /><select value={type} onChange={e=>setType(e.target.value)}><option>PDF</option><option>Document</option><option>TXT</option><option>Markdown</option></select><button className="btn primary" onClick={()=>{if(!title) return; upd((s:AppState)=>{s.resources.unshift({id:uid(),title,type,addedAt:new Date().toLocaleString(),note:''}); return s;}); setTitle('');}}>Add</button></div>
+      <div className="card"><h3>Import / add</h3>
+        <p className="muted">Import TXT/Markdown/CSV/JSON to capture text locally. PDF/other files are stored as metadata with guidance (true viewer/extraction needs additional tooling/backend).</p>
+        <div className="row"><input placeholder="Title (for manual entry)" value={title} onChange={e=>setTitle(e.target.value)} /><select value={type} onChange={e=>setType(e.target.value)}><option>PDF</option><option>Document</option><option>TXT</option><option>Markdown</option><option>Link</option></select><select value={subjectId} onChange={e=>setSubjectId(e.target.value)}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <div className="row" style={{marginTop:8}}><button className="btn" onClick={addEntry}>Add entry</button><label className="btn primary">Import file<input type="file" style={{display:'none'}} onChange={e=>importFile(e.target.files?.[0])} /></label></div>
       </div>
-      <div className="card"><h3>AI & research (planned)</h3><ul className="list"><li>Import & text extraction (Phase 6)</li><li>Q&A with source citations / RAG (Phase 6)</li><li>Generate notes, cards, mind maps, quizzes from docs (Phase 6)</li></ul></div>
+      <div className="card"><h3>Selected document</h3>{!selected ? <div className="empty">Select or import a document.</div> : <>
+        <div className="row spread"><b>{selected.title}</b><span className="tag">{selected.type}</span></div>
+        <div className="muted">{selected.fileName || ''} • {selected.addedAt} {selected.subjectId && <>• <span className="tag">{state.subjects.find(s=>s.id===selected.subjectId)?.name}</span></>}</div>
+        <label className="muted" style={{display:'block',marginTop:8}}>Subject</label>
+        <select value={selected.subjectId||''} onChange={e=>upd((s:AppState)=>{s.resources.find(r=>r.id===selected.id)!.subjectId=e.target.value||undefined; return s;})}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        <label className="muted" style={{display:'block',marginTop:8}}>Notes / URL</label>
+        <textarea value={selected.note||''} onChange={e=>upd((s:AppState)=>{s.resources.find(r=>r.id===selected.id)!.note=e.target.value; return s;})} placeholder="Notes, URL, or extracted highlights..." />
+        {selected.content && <><label className="muted" style={{display:'block',marginTop:8}}>Content preview</label><div className="node" style={{maxHeight:220,overflow:'auto',whiteSpace:'pre-wrap',fontSize:'.9rem'}}>{selected.content.slice(0,4000)}{selected.content.length>4000?'…':''}</div></>}
+        <div className="row" style={{marginTop:8, flexWrap:'wrap'}}><button className="btn" onClick={()=>createNoteFrom(selected)}>Create note</button><button className="btn" onClick={()=>aiSummarize(selected)} disabled={aiBusy}>{aiBusy?'AI...':'AI summarize'}</button><button className="btn danger" onClick={()=>{upd((s:AppState)=>{s.resources=s.resources.filter(x=>x.id!==selected.id); return s;}); setSel(null);}}>Remove</button></div>
+        <div className="muted" style={{marginTop:8,fontSize:'.8rem'}}>AI uses configured provider on provided text only (no RAG/index/citations over full library yet). Verify outputs.</div>
+      </>}</div>
     </div>
-    <div className="card"><h3>Document entries</h3>{state.resources.filter(r=>['PDF','Document','TXT','Markdown','Link'].includes(r.type)).length===0 ? <div className="empty">No documents yet.</div> : <ul className="list">{state.resources.filter(r=>['PDF','Document','TXT','Markdown','Link'].includes(r.type)).map(r=> <li key={r.id} className="row spread"><span><b>{r.title}</b> <span className="tag">{r.type}</span></span><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.resources=s.resources.filter(x=>x.id!==r.id); return s;})}>x</button></li>)}</ul>}</div>
+    <div className="card"><div className="row spread"><h3>Documents & entries</h3><input placeholder="Search documents..." value={q} onChange={e=>setQ(e.target.value)} /></div>
+      {docs.length===0 ? <div className="empty">No documents yet. Import a file or add an entry.</div> : <ul className="list">{docs.map(r=> <li key={r.id} className={`node ${selected?.id===r.id?'active':''}`} style={{cursor:'pointer'}} onClick={()=>setSel(r.id)}><div className="row spread"><b>{r.title}</b><span className="row"><span className="tag">{r.type}</span>{r.subjectId && <span className="tag">{state.subjects.find(s=>s.id===r.subjectId)?.name}</span>}</span></div><div className="muted">{r.fileName || r.note?.slice(0,60) || 'No preview'}</div></li>)}</ul>}
+    </div>
   </div>;
 }
 
@@ -583,16 +685,39 @@ function AiTutor({state, upd}:{state:AppState; upd:any}) {
 }
 
 function ResourceLibrary({state, upd}:{state:AppState; upd:any}) {
-  const [title,setTitle]=useState(''); const [type,setType]=useState('PDF'); const [note,setNote]=useState('');
+  const [title,setTitle]=useState(''); const [type,setType]=useState('Link'); const [note,setNote]=useState(''); const [url,setUrl]=useState(''); const [subjectId,setSubjectId]=useState(''); const [q,setQ]=useState(''); const [filterType,setFilterType]=useState('all');
+  const filtered = state.resources.filter(r=> (filterType==='all'||r.type===filterType) && (r.title+(r.note||'')+(r.url||'')).toLowerCase().includes(q.toLowerCase()));
+  const add = ()=>{ if(!title) return; upd((s:AppState)=>{s.resources.unshift({id:uid(),title,type,note,url:url||undefined,subjectId:subjectId||undefined,addedAt:new Date().toLocaleString()}); return s;}); setTitle(''); setNote(''); setUrl(''); };
+  const createNote = (r:ResourceItem)=>{
+    const body = `Source: ${r.title} (${r.type})${r.url?`\nURL: ${r.url}`:''}${r.note?`\n\n${r.note}`:''}${r.content?`\n\n${r.content.slice(0,4000)}`:''}`;
+    const n:Note={id:uid(),title:`Notes: ${r.title}`,body,tags:[],updatedAt:now(),tasks:[],subjectId:r.subjectId};
+    upd((s:AppState)=>{s.notes.unshift(n); return s;}); alert('Created a note from this resource (open Notes).');
+  };
   return <div>
-    <PageHeader title="Resource Library" subtitle="Central library for learning materials (local metadata now; file storage/sync later)" right={<span className="pill">{state.resources.length} items</span>} />
+    <PageHeader title="Resource Library" subtitle="Central library for materials/links — searchable, subject-linked, convertible to notes" right={<span className="pill">{state.resources.length} items</span>} />
     <div className="grid g2">
-      <div className="card"><h3>Add resource entry</h3><div className="row"><input placeholder="Title" value={title} onChange={e=>setTitle(e.target.value)} /><select value={type} onChange={e=>setType(e.target.value)}>{['PDF','Document','Image','Audio','Video','Link','Note','Other'].map(t=> <option key={t}>{t}</option>)}</select></div>
-        <textarea placeholder="Notes / URL / description" value={note} onChange={e=>setNote(e.target.value)} />
-        <button className="btn primary" onClick={()=>{if(!title) return; upd((s:AppState)=>{s.resources.unshift({id:uid(),title,type,note,addedAt:new Date().toLocaleString()}); return s;}); setTitle(''); setNote('');}}>Add</button>
+      <div className="card"><h3>Add resource</h3>
+        <div className="row"><input placeholder="Title" value={title} onChange={e=>setTitle(e.target.value)} /><select value={type} onChange={e=>setType(e.target.value)}>{['Link','PDF','Document','Image','Audio','Video','Note','Article','Other'].map(t=> <option key={t}>{t}</option>)}</select></div>
+        <div className="row" style={{marginTop:8}}><input style={{flex:1}} placeholder="URL (optional)" value={url} onChange={e=>setUrl(e.target.value)} /><select value={subjectId} onChange={e=>setSubjectId(e.target.value)}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+        <textarea placeholder="Notes / description" value={note} onChange={e=>setNote(e.target.value)} />
+        <button className="btn primary" onClick={add}>Add resource</button>
       </div>
-      <div className="card"><h3>Resources</h3>{state.resources.length===0 ? <div className="empty">No resources yet. Add entries or create notes/mind maps/flashcards (all connected, free).</div> : <ul className="list">{state.resources.map(r=> <li key={r.id} className="node"><div className="row spread"><b>{r.title}</b><span className="tag">{r.type}</span></div><div className="muted">{r.note}</div><button className="btn danger" onClick={()=>upd((s:AppState)=>{s.resources=s.resources.filter(x=>x.id!==r.id); return s;})}>remove</button></li>)}</ul>}</div>
+      <div className="card"><h3>Browse</h3>
+        <div className="row"><input placeholder="Search..." value={q} onChange={e=>setQ(e.target.value)} style={{flex:1}} /><select value={filterType} onChange={e=>setFilterType(e.target.value)}><option value="all">All types</option>{['Link','PDF','Document','TXT','Markdown','Image','Audio','Video','Note','Article','Other'].map(t=> <option key={t} value={t}>{t}</option>)}</select></div>
+        <div className="muted" style={{marginTop:8}}>Tip: link resources to subjects and convert to notes/flashcards/mind-map inputs as part of your study workflow.</div>
+      </div>
     </div>
+    <div className="card"><h3>Resources ({filtered.length})</h3>{filtered.length===0 ? <div className="empty">No resources match. Add entries or import documents in Documents.</div> : <ul className="list">{filtered.map(r=> <li key={r.id} className="node">
+      <div className="row spread"><b>{r.title}</b><span className="row"><span className="tag">{r.type}</span>{r.subjectId && <span className="tag">{state.subjects.find(s=>s.id===r.subjectId)?.name}</span>}</span></div>
+      {r.url && <div><a href={r.url} target="_blank" rel="noreferrer">{r.url}</a></div>}
+      {r.note && <div className="muted" style={{whiteSpace:'pre-wrap'}}>{r.note}</div>}
+      <div className="row" style={{marginTop:6, flexWrap:'wrap'}}>
+        <select value={r.subjectId||''} onChange={e=>upd((s:AppState)=>{s.resources.find(x=>x.id===r.id)!.subjectId=e.target.value||undefined; return s;})}><option value="">No subject</option>{state.subjects.map(s=> <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+        <button className="btn" onClick={()=>{const n=prompt('Edit notes', r.note||''); if(n!=null) upd((s:AppState)=>{s.resources.find(x=>x.id===r.id)!.note=n; return s;});}}>Edit notes</button>
+        <button className="btn" onClick={()=>createNote(r)}>Create note</button>
+        <button className="btn danger" onClick={()=>upd((s:AppState)=>{s.resources=s.resources.filter(x=>x.id!==r.id); return s;})}>Remove</button>
+      </div>
+    </li>)}</ul>}</div>
   </div>;
 }
 

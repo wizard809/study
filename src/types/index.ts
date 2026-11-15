@@ -18,7 +18,7 @@ export interface Question { id: string; prompt: string; options: string[]; answe
 export interface Quiz { id: string; name: string; questions: Question[]; attempts: {id:string; score:number; total:number; at:string}[] }
 export interface SyllabusItem { id: string; text: string; status: 'not-started'|'learning'|'completed'|'needs-revision'|'mastered' }
 export interface Exam { id: string; name: string; subjectId?: string; date: string; syllabus: SyllabusItem[]; status: string }
-export interface ResourceItem { id: string; title: string; type: string; subjectId?: string; note?: string; addedAt: string }
+export interface ResourceItem { id: string; title: string; type: string; subjectId?: string; note?: string; url?: string; content?: string; fileName?: string; addedAt: string }
 export interface StudyGroup { id: string; name: string; description: string; members: number }
 
 export interface AIProvider {
